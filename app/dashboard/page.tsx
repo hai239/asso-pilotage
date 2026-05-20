@@ -1,6 +1,7 @@
 import StatCard from "@/components/StatCard"
-import { Euro, BookOpen, Megaphone, UserCog } from "lucide-react"
+import { Euro, BookOpen, Megaphone, UserCog, ClipboardCheck, Users, Map } from "lucide-react"
 import { finances, ateliers, communication, membres } from "@/lib/mock-data"
+import Link from "next/link"
 
 function todayFr() {
   return new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
@@ -95,6 +96,33 @@ export default function DashboardPage() {
             { label: "Candidatures en attente", value: membresEnAttente, highlight: membresEnAttente > 0 },
           ]}
         />
+      </div>
+
+      {/* Accès rapide */}
+      <div className="mt-8">
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Accès rapide</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2">
+          {[
+            { href: "/emargement",    label: "Émargement",    icon: ClipboardCheck, accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
+            { href: "/finances",      label: "Finances",      icon: Euro,           accent: "bg-finances-light text-finances-dark",           dot: "bg-finances" },
+            { href: "/ateliers",      label: "Ateliers",      icon: BookOpen,       accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
+            { href: "/beneficiaires", label: "Bénéficiaires", icon: Users,          accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
+            { href: "/communication", label: "Communication", icon: Megaphone,      accent: "bg-communication-light text-communication-dark", dot: "bg-communication" },
+            { href: "/membres",       label: "Membres",       icon: UserCog,        accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
+            { href: "/roadmap",       label: "Roadmap",       icon: Map,            accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
+          ].map(({ href, label, icon: Icon, accent }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`flex flex-col items-center gap-2 px-3 py-4 rounded-xl border border-border bg-surface hover:border-slate-300 hover:shadow-sm transition-all group`}
+            >
+              <span className={`w-9 h-9 rounded-lg flex items-center justify-center ${accent} group-hover:scale-110 transition-transform`}>
+                <Icon size={16} />
+              </span>
+              <span className="text-xs font-medium text-muted group-hover:text-foreground transition-colors text-center leading-tight">{label}</span>
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   )
