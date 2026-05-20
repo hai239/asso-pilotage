@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 import { Geist } from "next/font/google"
 import "./globals.css"
-import Sidebar from "@/components/Sidebar"
+import { AuthProvider } from "@/lib/auth-context"
+import AuthGate from "@/components/AuthGate"
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
 
@@ -14,8 +15,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fr" className={`${geistSans.variable} h-full`}>
       <body className="h-full flex bg-background">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <AuthProvider>
+          <AuthGate>
+            <main className="flex-1 overflow-y-auto">{children}</main>
+          </AuthGate>
+        </AuthProvider>
       </body>
     </html>
   )

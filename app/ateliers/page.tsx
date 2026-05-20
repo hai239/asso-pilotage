@@ -5,8 +5,18 @@ import { ateliers as ateliersMock } from "@/lib/mock-data"
 import { MapPin, AlertTriangle, Shuffle, Users, CalendarDays, GraduationCap, Pencil } from "lucide-react"
 import SlideOver, { Field, Input, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 
-// Apprenante avec notes persistées
-type Apprenante = (typeof ateliersMock.apprenantes)[0] & { notes?: string }
+// Apprenante avec notes persistées (notes peuvent être null après édition)
+interface Apprenante {
+  id: number
+  nom: string
+  groupe: string
+  noteLogique: number | null
+  notePratique: number | null
+  noteProjet: number | null
+  presences: number
+  absences: number
+  notes?: string
+}
 const STORAGE_APP = "asso-apprenantes"
 
 function loadApp(): Apprenante[] {
@@ -27,7 +37,7 @@ function noteColor(n: number | null) {
   return "text-alert font-semibold"
 }
 
-function moyenne(a: (typeof ateliers.apprenantes)[0]) {
+function moyenne(a: Apprenante) {
   const notes = [a.noteLogique, a.notePratique, a.noteProjet].filter((n): n is number => n !== null)
   if (notes.length === 0) return null
   return Math.round((notes.reduce((s, n) => s + n, 0) / notes.length) * 10) / 10
@@ -51,7 +61,7 @@ const GROUPE_COLORS: Record<Groupe, string> = {
 }
 
 // Auto-balance algorithm: répartit les apprenantes équitablement par niveau
-function autoBalance(apprenantes: (typeof ateliers.apprenantes)): Record<Groupe, number[]> {
+function autoBalance(apprenantes: Apprenante[]): Record<Groupe, number[]> {
   const sorted = [...apprenantes]
     .map((a) => ({ ...a, moy: moyenne(a) }))
     .sort((a, b) => (b.moy ?? 0) - (a.moy ?? 0))

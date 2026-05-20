@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { themes, allUseCases, TOTAL_SUB_ACTIONS, TOTAL_USE_CASES, type Status } from "@/lib/roadmap-data"
+import { themes, allUseCases, TOTAL_SUB_ACTIONS, TOTAL_USE_CASES, type Status, type UseCase } from "@/lib/roadmap-data"
 import { ChevronDown, ChevronRight, CheckCircle2, Circle, Timer, BarChart2, List, StickyNote } from "lucide-react"
 
 const STORAGE_KEY = "asso-roadmap-statuses"
@@ -46,7 +46,8 @@ function MatriceView({ statuses }: { statuses: Record<string, Status> }) {
   const scored = allUseCases.filter((uc) => uc.impact !== undefined && uc.ease !== undefined)
   const unscored = allUseCases.filter((uc) => uc.impact === undefined || uc.ease === undefined)
 
-  const grid: typeof allUseCases[][][] = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []))
+  type UCWithTheme = (typeof allUseCases)[number]
+  const grid: UCWithTheme[][][] = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []))
   scored.forEach((uc) => {
     const row = 4 - (uc.impact ?? 1)   // impact 4 → row 0 (top)
     const col = (uc.ease ?? 1) - 1     // ease 1 → col 0 (left)

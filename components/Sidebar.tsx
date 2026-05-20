@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
   UserX,
@@ -12,16 +12,22 @@ import {
   Heart,
   Map,
   ClipboardCheck,
+  UserCircle,
+  LogOut,
+  UserCog,
 } from "lucide-react"
+import { useAuth } from "@/lib/auth-context"
+import { ROLE_LABELS } from "@/lib/auth"
 
 const navItems = [
-  { href: "/dashboard",      label: "Vue d'ensemble",  icon: LayoutDashboard, accent: "bg-slate-100 text-slate-700",                      dot: "bg-slate-500" },
-  { href: "/emargement",     label: "Émargement",       icon: ClipboardCheck,  accent: "bg-ateliers-light text-ateliers-dark",              dot: "bg-ateliers" },
-  { href: "/absences",       label: "Absences",         icon: UserX,           accent: "bg-absences-light text-absences-dark",              dot: "bg-absences" },
-  { href: "/finances",       label: "Finances",         icon: Euro,            accent: "bg-finances-light text-finances-dark",              dot: "bg-finances" },
-  { href: "/ateliers",       label: "Ateliers",         icon: BookOpen,        accent: "bg-ateliers-light text-ateliers-dark",              dot: "bg-ateliers" },
-  { href: "/communication",  label: "Communication",    icon: Megaphone,       accent: "bg-communication-light text-communication-dark",    dot: "bg-communication" },
-  { href: "/benevoles",      label: "Bénévoles",        icon: Users,           accent: "bg-benevoles-light text-benevoles-dark",            dot: "bg-benevoles" },
+  { href: "/dashboard",     label: "Vue d'ensemble", icon: LayoutDashboard, accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
+  { href: "/emargement",    label: "Émargement",      icon: ClipboardCheck,  accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
+  { href: "/absences",      label: "Absences",        icon: UserX,           accent: "bg-absences-light text-absences-dark",           dot: "bg-absences" },
+  { href: "/finances",      label: "Finances",        icon: Euro,            accent: "bg-finances-light text-finances-dark",           dot: "bg-finances" },
+  { href: "/ateliers",      label: "Ateliers",        icon: BookOpen,        accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
+  { href: "/communication", label: "Communication",   icon: Megaphone,       accent: "bg-communication-light text-communication-dark", dot: "bg-communication" },
+  { href: "/benevoles",     label: "Bénévoles",       icon: Users,           accent: "bg-benevoles-light text-benevoles-dark",         dot: "bg-benevoles" },
+  { href: "/membres",       label: "Membres",         icon: UserCog,         accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
 ]
 
 const stratItems = [
@@ -30,6 +36,13 @@ const stratItems = [
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const router   = useRouter()
+  const { user, logout } = useAuth()
+
+  function handleLogout() {
+    logout()
+    router.replace("/login")
+  }
 
   return (
     <aside className="w-60 min-h-screen bg-surface border-r border-border flex flex-col shrink-0">
@@ -40,7 +53,7 @@ export default function Sidebar() {
         <span className="font-semibold text-foreground text-sm tracking-wide">Asso</span>
       </div>
 
-      <nav className="flex-1 p-3 flex flex-col gap-1">
+      <nav className="flex-1 p-3 flex flex-col gap-1 overflow-y-auto">
         <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-1.5 mt-1">Opérationnel</p>
         {navItems.map(({ href, label, icon: Icon, accent, dot }) => {
           const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href))
@@ -81,10 +94,23 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="p-4 border-t border-border text-xs text-muted">
-        <p>Données simulées</p>
-        <p className="mt-0.5 text-slate-400">Google Sheets à connecter</p>
-      </div>
+      {/* Utilisateur connecté */}
+      {user && (
+        <div className="p-3 border-t border-border">
+          <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-slate-50">
+            <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
+              <UserCircle size={16} className="text-slate-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-foreground truncate">{user.prenom} {user.nom}</p>
+              <p className="text-[10px] text-muted truncate">{ROLE_LABELS[user.role]}</p>
+            </div>
+            <button onClick={handleLogout} title="Se déconnecter" className="p-1 rounded hover:bg-slate-200 text-muted transition-colors">
+              <LogOut size={13} />
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }
