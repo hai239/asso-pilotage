@@ -1,88 +1,136 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
-import {
-  seances, apprenantes, presencesInitiales, calcAbsences,
-  type PresenceStatus,
-} from "@/lib/emargement-data"
-import { Phone, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown } from "lucide-react"
+import { useState, useEffect } from "react"
+import { ateliers as ateliersMock } from "@/lib/mock-data"
+import { Phone, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, ClipboardCheck } from "lucide-react"
 
-const STORAGE_KEY = "asso-presences"
+// ──────────────────────────────────────────────
+// Types partagés avec ateliers/page.tsx
+// ──────────────────────────────────────────────
+type PresenceStatus = "présent" | "absent" | "excusé" | "retard"
 
+interface Session {
+  id: number; titre: string; date: string; heure: string
+  salle: string; formatrice: string
+  beneficiaireIds: number[]; statut: string
+}
+interface Beneficiaire {
+  id: number; prenom: string; nom: string; telephone: string; niveau: string; statut: string
+}
+
+// ──────────────────────────────────────────────
+// Storage — mêmes clés que la page ateliers
+// ──────────────────────────────────────────────
+const S_SESSIONS    = "asso-ateliers-sessions"
+const S_BENEF       = "asso-beneficiaires"
+const S_PRESENCES   = (id: number) => `asso-presences-atelier-${id}`
+const S_SELECTED    = "asso-emargement-session"
+const SEUIL_ALERTE  = 3  // absences avant alerte décrochage
+
+function loadJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback } catch { return fallback }
+}
+
+// ──────────────────────────────────────────────
+// Config statuts
+// ──────────────────────────────────────────────
 const STATUS_CONFIG: Record<PresenceStatus, { label: string; bg: string; text: string; icon: React.ReactNode }> = {
-  présent:  { label: "Présent",  bg: "bg-finances-light",       text: "text-finances-dark",       icon: <CheckCircle size={13} /> },
-  absent:   { label: "Absent",   bg: "bg-absences-light",       text: "text-absences-dark",       icon: <XCircle size={13} /> },
-  excusé:   { label: "Excusé",   bg: "bg-blue-50",              text: "text-blue-700",             icon: <Clock size={13} /> },
-  retard:   { label: "Retard",   bg: "bg-communication-light",  text: "text-communication-dark",   icon: <Clock size={13} /> },
+  présent: { label: "Présent",  bg: "bg-finances-light",      text: "text-finances-dark",      icon: <CheckCircle size={13} /> },
+  absent:  { label: "Absent",   bg: "bg-absences-light",      text: "text-absences-dark",      icon: <XCircle size={13} /> },
+  excusé:  { label: "Excusé",   bg: "bg-blue-50",             text: "text-blue-700",            icon: <Clock size={13} /> },
+  retard:  { label: "Retard",   bg: "bg-communication-light", text: "text-communication-dark",  icon: <Clock size={13} /> },
 }
 
 const STATUS_CYCLE: PresenceStatus[] = ["présent", "absent", "excusé", "retard"]
 
-function loadPresences(): Record<string, Record<number, PresenceStatus>> {
-  if (typeof window === "undefined") return presencesInitiales
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    return saved ? JSON.parse(saved) : presencesInitiales
-  } catch { return presencesInitiales }
-}
-function savePresences(p: Record<string, Record<number, PresenceStatus>>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
-}
-
+// ──────────────────────────────────────────────
+// Page
+// ──────────────────────────────────────────────
 export default function EmargementPage() {
-  const [presences, setPresences] = useState<Record<string, Record<number, PresenceStatus>>>(presencesInitiales)
-  const [selectedSeanceId, setSelectedSeanceId] = useState(seances[0].id)
+  const [sessions, setSessions]       = useState<Session[]>(ateliersMock.sessions as Session[])
+  const [beneficiaires, setBenef]     = useState<Beneficiaire[]>(ateliersMock.beneficiaires as Beneficiaire[])
+  const [selectedId, setSelectedId]   = useState<number>(0)
+  // presences: { sessionId → { benefId → PresenceStatus } }
+  const [allPresences, setAllPresences] = useState<Record<number, Record<number, PresenceStatus>>>({})
 
-  useEffect(() => { setPresences(loadPresences()) }, [])
+  // Hydratation
+  useEffect(() => {
+    const loadedSessions  = loadJson<Session[]>(S_SESSIONS, ateliersMock.sessions as Session[])
+    const loadedBenefs    = loadJson<Beneficiaire[]>(S_BENEF, ateliersMock.beneficiaires as Beneficiaire[])
+    setSessions(loadedSessions)
+    setBenef(loadedBenefs)
 
-  const selectedSeance = seances.find((s) => s.id === selectedSeanceId)!
-  const seanceApprenantes = apprenantes.filter((a) => selectedSeance.apprenanteIds.includes(a.id))
-  const seancePresences = presences[selectedSeanceId] ?? {}
+    // Pré-sélection depuis le bouton "Émarger" d'un atelier
+    const preSelected = loadJson<number>(S_SELECTED, 0)
+    const firstId = loadedSessions[0]?.id ?? 0
+    setSelectedId(preSelected && loadedSessions.find(s => s.id === preSelected) ? preSelected : firstId)
 
-  // Stats pour la séance sélectionnée
-  const presents = seanceApprenantes.filter((a) => seancePresences[a.id] === "présent").length
-  const absents  = seanceApprenantes.filter((a) => seancePresences[a.id] === "absent").length
-  const excuses  = seanceApprenantes.filter((a) => seancePresences[a.id] === "excusé").length
-  const tauxPresence = seanceApprenantes.length > 0 ? Math.round((presents / seanceApprenantes.length) * 100) : 0
-
-  // Apprenantes à appeler (absentes non excusées)
-  const aAppeler = seanceApprenantes.filter((a) => seancePresences[a.id] === "absent")
-
-  // Alertes décrochage (>= seuil absences toutes séances confondues)
-  const enDecrochage = apprenantes.filter((a) => calcAbsences(presences, a.id) >= a.seuilAlerte)
-
-  function toggleStatus(apprenanteId: number) {
-    setPresences((prev) => {
-      const current = prev[selectedSeanceId]?.[apprenanteId] ?? "absent"
-      const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(current) + 1) % STATUS_CYCLE.length]
-      const updated = {
-        ...prev,
-        [selectedSeanceId]: { ...prev[selectedSeanceId], [apprenanteId]: next },
-      }
-      savePresences(updated)
-      return updated
+    // Charger toutes les présences existantes
+    const combined: Record<number, Record<number, PresenceStatus>> = {}
+    loadedSessions.forEach(s => {
+      const p = loadJson<Record<number, PresenceStatus>>(S_PRESENCES(s.id), {})
+      if (Object.keys(p).length > 0) combined[s.id] = p
     })
+    setAllPresences(combined)
+  }, [])
+
+  const session  = sessions.find(s => s.id === selectedId)
+  const benefs   = (session?.beneficiaireIds ?? [])
+    .map(id => beneficiaires.find(b => b.id === id))
+    .filter(Boolean) as Beneficiaire[]
+  const seancePresences = allPresences[selectedId] ?? {}
+
+  function toggle(benefId: number) {
+    const current = seancePresences[benefId] ?? "présent"
+    const next    = STATUS_CYCLE[(STATUS_CYCLE.indexOf(current) + 1) % STATUS_CYCLE.length]
+    const updated = { ...allPresences, [selectedId]: { ...seancePresences, [benefId]: next } }
+    setAllPresences(updated)
+    localStorage.setItem(S_PRESENCES(selectedId), JSON.stringify(updated[selectedId]))
   }
+
+  // Stats séance courante
+  const presents  = benefs.filter(b => (seancePresences[b.id] ?? "présent") === "présent").length
+  const absents   = benefs.filter(b => (seancePresences[b.id] ?? "présent") === "absent").length
+  const excuses   = benefs.filter(b => (seancePresences[b.id] ?? "présent") === "excusé").length
+  const taux      = benefs.length > 0 ? Math.round((presents / benefs.length) * 100) : 0
+  const aAppeler  = benefs.filter(b => (seancePresences[b.id] ?? "présent") === "absent")
+
+  // Décrochage — total absences sur toutes les séances
+  function totalAbsences(benefId: number): number {
+    return Object.values(allPresences).reduce((acc, sp) => {
+      return acc + (sp[benefId] === "absent" ? 1 : 0)
+    }, 0)
+  }
+  const enDecrochage = beneficiaires.filter(
+    b => b.statut === "actif" && totalAbsences(b.id) >= SEUIL_ALERTE
+  )
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Émargement numérique</h1>
-        <p className="text-sm text-muted mt-1">Feuille de présence interactive — alertes décrochage automatiques</p>
+      <header className="mb-6 flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-ateliers-light flex items-center justify-center shrink-0">
+          <ClipboardCheck size={20} className="text-ateliers-dark" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Émargement</h1>
+          <p className="text-sm text-muted mt-0.5">Feuille de présence en temps réel · alertes décrochage automatiques</p>
+        </div>
       </header>
 
       {/* Sélecteur de séance */}
       <div className="mb-6">
-        <label className="text-xs font-semibold text-muted uppercase tracking-wider block mb-2">Séance</label>
+        <label className="text-xs font-semibold text-muted uppercase tracking-wider block mb-2">Atelier</label>
         <div className="relative w-full max-w-md">
           <select
-            value={selectedSeanceId}
-            onChange={(e) => setSelectedSeanceId(e.target.value)}
+            value={selectedId}
+            onChange={e => { const id = Number(e.target.value); setSelectedId(id); localStorage.setItem(S_SELECTED, String(id)) }}
             className="w-full appearance-none bg-surface border border-border rounded-xl px-4 py-3 pr-10 text-sm font-medium text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-ateliers"
           >
-            {seances.map((s) => (
+            {sessions.map(s => (
               <option key={s.id} value={s.id}>
-                {new Date(s.date).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} — {s.atelier} ({s.groupe}) · {s.heure}
+                {new Date(s.date).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} — {s.titre} · {s.heure}
+                {s.salle ? ` · ${s.salle}` : ""}
               </option>
             ))}
           </select>
@@ -93,71 +141,86 @@ export default function EmargementPage() {
       <div className="grid grid-cols-3 gap-8">
         {/* Feuille de présence */}
         <div className="col-span-2 space-y-4">
-          {/* Stats de la séance */}
+          {/* Stats */}
           <div className="grid grid-cols-4 gap-3">
             <div className="bg-surface rounded-xl border border-border p-3 text-center">
-              <p className="text-2xl font-bold text-foreground">{seanceApprenantes.length}</p>
-              <p className="text-xs text-muted mt-0.5">Inscrites</p>
+              <p className="text-2xl font-bold text-foreground">{benefs.length}</p>
+              <p className="text-xs text-muted mt-0.5">Inscrits</p>
             </div>
             <div className="bg-finances-light rounded-xl border border-finances/20 p-3 text-center">
               <p className="text-2xl font-bold text-finances-dark">{presents}</p>
-              <p className="text-xs text-finances-dark/70 mt-0.5">Présentes</p>
+              <p className="text-xs text-finances-dark/70 mt-0.5">Présents</p>
             </div>
             <div className="bg-absences-light rounded-xl border border-absences/20 p-3 text-center">
               <p className="text-2xl font-bold text-absences-dark">{absents}</p>
-              <p className="text-xs text-absences-dark/70 mt-0.5">Absentes</p>
+              <p className="text-xs text-absences-dark/70 mt-0.5">Absents</p>
             </div>
             <div className="bg-ateliers-light rounded-xl border border-ateliers/20 p-3 text-center">
-              <p className="text-2xl font-bold text-ateliers-dark">{tauxPresence}%</p>
+              <p className="text-2xl font-bold text-ateliers-dark">{taux}%</p>
               <p className="text-xs text-ateliers-dark/70 mt-0.5">Présence</p>
             </div>
           </div>
 
-          {/* Liste des apprenantes */}
+          {/* Liste bénéficiaires */}
           <div className="bg-surface rounded-xl border border-border overflow-hidden">
-            <div className="px-5 py-3 border-b border-border bg-slate-50 flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted uppercase tracking-wider">
-                {selectedSeance.atelier} · {selectedSeance.groupe}
-              </span>
-              <span className="text-xs text-muted">{selectedSeance.formatrice} · {selectedSeance.heure}</span>
-            </div>
-            <ul className="divide-y divide-border">
-              {seanceApprenantes.map((a) => {
-                const statut = seancePresences[a.id] ?? "absent"
-                const config = STATUS_CONFIG[statut]
-                const totalAbsences = calcAbsences(presences, a.id)
-                const isAlerte = totalAbsences >= a.seuilAlerte
-                return (
-                  <li key={a.id} className="px-5 py-3.5 flex items-center gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-foreground text-sm">{a.nom}</p>
-                        {isAlerte && (
-                          <span className="flex items-center gap-1 text-xs text-alert font-medium">
-                            <AlertTriangle size={11} /> {totalAbsences} abs.
-                          </span>
+            {session && (
+              <div className="px-5 py-3 border-b border-border bg-slate-50 flex items-center justify-between">
+                <span className="text-xs font-semibold text-muted uppercase tracking-wider">{session.titre}</span>
+                <span className="text-xs text-muted">
+                  {session.formatrice && `${session.formatrice} · `}{session.heure}
+                  {session.salle && ` · ${session.salle}`}
+                </span>
+              </div>
+            )}
+            {benefs.length === 0 ? (
+              <p className="text-center text-sm text-muted py-8 italic">
+                Aucun bénéficiaire inscrit à cet atelier.<br />
+                <span className="text-xs">Ajoutez-en depuis la page Ateliers.</span>
+              </p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {benefs.map(b => {
+                  const status  = seancePresences[b.id] ?? "présent"
+                  const config  = STATUS_CONFIG[status]
+                  const nbAbs   = totalAbsences(b.id)
+                  const alerte  = nbAbs >= SEUIL_ALERTE
+                  return (
+                    <li key={b.id} className="px-5 py-3.5 flex items-center gap-4">
+                      <div className="w-9 h-9 rounded-full bg-ateliers-light flex items-center justify-center shrink-0">
+                        <span className="text-xs font-bold text-ateliers-dark">{b.prenom[0]}{b.nom[0]}</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-foreground text-sm">{b.prenom} {b.nom}</p>
+                          {alerte && (
+                            <span className="flex items-center gap-0.5 text-xs text-alert font-medium">
+                              <AlertTriangle size={11} /> {nbAbs} abs.
+                            </span>
+                          )}
+                        </div>
+                        {status === "absent" && b.telephone && (
+                          <a href={`tel:${b.telephone.replace(/\s/g, "")}`} className="text-xs text-absences-dark underline underline-offset-2 mt-0.5 block">
+                            {b.telephone}
+                          </a>
                         )}
                       </div>
-                      <p className="text-xs text-muted mt-0.5">{a.groupe}</p>
-                    </div>
-                    {statut === "absent" && (
-                      <span className="text-xs text-muted">{a.contactParent}</span>
-                    )}
-                    <button
-                      onClick={() => toggleStatus(a.id)}
-                      title="Cliquer pour changer le statut"
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all hover:opacity-80 ${config.bg} ${config.text}`}
-                    >
-                      {config.icon}
-                      {config.label}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+                      <button
+                        onClick={() => toggle(b.id)}
+                        title="Cliquer pour changer le statut"
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all hover:opacity-80 ${config.bg} ${config.text}`}
+                      >
+                        {config.icon}
+                        {config.label}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
-
-          <p className="text-xs text-muted text-center">Cliquez sur un statut pour le faire tourner : Présent → Absent → Excusé → Retard</p>
+          <p className="text-xs text-muted text-center">
+            Cliquer sur un statut pour le faire tourner : Présent → Absent → Excusé → Retard
+          </p>
         </div>
 
         {/* Panneau latéral */}
@@ -170,14 +233,17 @@ export default function EmargementPage() {
             {aAppeler.length === 0 ? (
               <p className="text-xs text-absences-dark/60 italic">Aucun appel nécessaire</p>
             ) : (
-              <ul className="space-y-2">
-                {aAppeler.map((a) => (
-                  <li key={a.id} className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium text-absences-dark">{a.nom}</span>
-                    <div className="flex items-center gap-2">
-                      <a href={`tel:${a.contactParent.replace(/\s/g, "")}`} className="text-xs text-absences-dark/80 underline underline-offset-2">{a.contactParent}</a>
-                      <span className="text-xs text-absences-dark/50">(parent)</span>
-                    </div>
+              <ul className="space-y-3">
+                {aAppeler.map(b => (
+                  <li key={b.id}>
+                    <p className="text-sm font-medium text-absences-dark">{b.prenom} {b.nom}</p>
+                    {b.telephone ? (
+                      <a href={`tel:${b.telephone.replace(/\s/g, "")}`} className="text-xs text-absences-dark/80 underline underline-offset-2">
+                        {b.telephone}
+                      </a>
+                    ) : (
+                      <span className="text-xs text-absences-dark/50 italic">Pas de téléphone</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -188,43 +254,40 @@ export default function EmargementPage() {
           <div className="bg-surface rounded-xl border border-border p-4">
             <h3 className="font-semibold text-foreground text-sm mb-3 flex items-center gap-2">
               <AlertTriangle size={14} className="text-alert" />
-              Décrochage ({enDecrochage.length})
+              Décrochage ≥ {SEUIL_ALERTE} abs. ({enDecrochage.length})
             </h3>
             {enDecrochage.length === 0 ? (
-              <p className="text-xs text-muted italic">Aucune alerte décrochage</p>
+              <p className="text-xs text-muted italic">Aucune alerte</p>
             ) : (
               <ul className="space-y-2">
-                {enDecrochage.map((a) => {
-                  const nbAbs = calcAbsences(presences, a.id)
-                  return (
-                    <li key={a.id} className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-foreground">{a.nom}</span>
-                      <span className="text-xs font-semibold text-alert">{nbAbs} abs.</span>
-                    </li>
-                  )
-                })}
+                {enDecrochage.map(b => (
+                  <li key={b.id} className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-foreground">{b.prenom} {b.nom}</span>
+                    <span className="text-xs font-semibold text-alert">{totalAbsences(b.id)} abs.</span>
+                  </li>
+                ))}
               </ul>
             )}
           </div>
 
-          {/* Recap toutes séances */}
+          {/* Récap toutes les séances */}
           <div className="bg-surface rounded-xl border border-border p-4">
             <h3 className="font-semibold text-foreground text-sm mb-3">Toutes les séances</h3>
             <ul className="space-y-1.5">
-              {seances.map((s) => {
-                const sApp = apprenantes.filter((a) => s.apprenanteIds.includes(a.id))
-                const sPresences = presences[s.id] ?? {}
-                const sPresents = sApp.filter((a) => sPresences[a.id] === "présent").length
+              {sessions.map(s => {
+                const sp     = allPresences[s.id] ?? {}
+                const sBenef = s.beneficiaireIds.map(id => beneficiaires.find(b => b.id === id)).filter(Boolean) as Beneficiaire[]
+                const sPresents = sBenef.filter(b => (sp[b.id] ?? "présent") === "présent").length
                 return (
                   <li key={s.id} className="flex items-center justify-between text-xs">
                     <button
-                      onClick={() => setSelectedSeanceId(s.id)}
-                      className={`text-left hover:text-foreground transition-colors ${selectedSeanceId === s.id ? "font-semibold text-ateliers-dark" : "text-muted"}`}
+                      onClick={() => { setSelectedId(s.id); localStorage.setItem(S_SELECTED, String(s.id)) }}
+                      className={`text-left hover:text-foreground transition-colors truncate flex-1 ${selectedId === s.id ? "font-semibold text-ateliers-dark" : "text-muted"}`}
                     >
-                      {new Date(s.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} — {s.atelier.split(" ")[0]}
+                      {new Date(s.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} — {s.titre.split(" ")[0]}
                     </button>
-                    <span className={`font-medium ${selectedSeanceId === s.id ? "text-ateliers-dark" : "text-muted"}`}>
-                      {sPresents}/{sApp.length}
+                    <span className={`font-medium ml-2 shrink-0 ${selectedId === s.id ? "text-ateliers-dark" : "text-muted"}`}>
+                      {sPresents}/{sBenef.length}
                     </span>
                   </li>
                 )

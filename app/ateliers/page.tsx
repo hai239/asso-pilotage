@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { ateliers as ateliersMock, benevoles as benevolesMock } from "@/lib/mock-data"
-import { Plus, Pencil, CalendarDays, Users, CheckCircle, XCircle, Clock, UserCheck } from "lucide-react"
+import Link from "next/link"
+import { Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck } from "lucide-react"
 import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 
 // ──────────────────────────────────────────────
@@ -11,8 +12,6 @@ import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteB
 type SessionStatut = "planifié" | "en cours" | "terminé" | "annulé"
 type NiveauBenef = "débutant" | "intermédiaire" | "avancé"
 type StatutBenef = "actif" | "diplômé" | "abandon"
-type PresenceStatus = "présent" | "absent" | "excusé" | "retard"
-
 interface Session {
   id: number
   titre: string
@@ -66,15 +65,6 @@ const niveauStyle: Record<NiveauBenef, string> = {
   "intermédiaire": "bg-ateliers-light text-ateliers-dark",
   "avancé":        "bg-finances-light text-finances-dark",
 }
-
-const presenceStyle: Record<PresenceStatus, string> = {
-  "présent": "bg-finances-light text-finances-dark",
-  "absent":  "bg-absences-light text-absences-dark",
-  "excusé":  "bg-slate-100 text-slate-600",
-  "retard":  "bg-orange-100 text-orange-700",
-}
-
-const PRESENCE_CYCLE: PresenceStatus[] = ["présent", "absent", "excusé", "retard"]
 
 const emptySession = (): Omit<Session, "id"> => ({
   titre: "", description: "", date: new Date().toISOString().split("T")[0],
@@ -148,9 +138,20 @@ function AteliersTab({
             )}
           </div>
         </div>
-        <button onClick={() => onEdit(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          <Pencil size={13} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {s.statut !== "terminé" && s.statut !== "annulé" && (
+            <Link
+              href="/emargement"
+              onClick={() => localStorage.setItem("asso-emargement-session", String(s.id))}
+              className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-lg bg-ateliers-light text-ateliers-dark hover:opacity-80 transition-opacity"
+            >
+              <ClipboardCheck size={11} /> Émarger
+            </Link>
+          )}
+          <button onClick={() => onEdit(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted">
+            <Pencil size={13} />
+          </button>
+        </div>
       </li>
     )
   }
@@ -176,103 +177,6 @@ function AteliersTab({
             {past.map(s => <SessionCard key={s.id} s={s} />)}
           </ul>
         </section>
-      )}
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────
-// Onglet Présences
-// ──────────────────────────────────────────────
-function PresencesTab({ sessions, beneficiaires }: { sessions: Session[]; beneficiaires: Beneficiaire[] }) {
-  const [selectedId, setSelectedId] = useState<number>(sessions[0]?.id ?? 0)
-  const session = sessions.find(s => s.id === selectedId)
-  const [presences, setPresences] = useState<Record<number, PresenceStatus>>({})
-
-  useEffect(() => {
-    if (!selectedId) return
-    setPresences(load(S_PRESENCES(selectedId), {}))
-  }, [selectedId])
-
-  function toggle(benefId: number) {
-    const current = presences[benefId] ?? "présent"
-    const next = PRESENCE_CYCLE[(PRESENCE_CYCLE.indexOf(current) + 1) % PRESENCE_CYCLE.length]
-    const updated = { ...presences, [benefId]: next }
-    setPresences(updated)
-    localStorage.setItem(S_PRESENCES(selectedId), JSON.stringify(updated))
-  }
-
-  const benefs = (session?.beneficiaireIds ?? []).map(id => beneficiaires.find(b => b.id === id)).filter(Boolean) as Beneficiaire[]
-  const presents = benefs.filter(b => (presences[b.id] ?? "présent") === "présent").length
-
-  return (
-    <div className="space-y-4">
-      {/* Sélecteur de session */}
-      <div className="bg-surface rounded-xl border border-border p-4">
-        <label className="block text-xs font-medium text-muted mb-2">Sélectionner un atelier</label>
-        <select
-          value={selectedId}
-          onChange={e => setSelectedId(Number(e.target.value))}
-          className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ateliers/30"
-        >
-          {sessions.map(s => (
-            <option key={s.id} value={s.id}>
-              {new Date(s.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} — {s.titre}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {session && (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-ateliers-light rounded-xl border border-ateliers/20 p-3">
-              <p className="text-2xl font-bold text-ateliers-dark">{presents}/{benefs.length}</p>
-              <p className="text-xs text-ateliers-dark/70 mt-0.5">Présents</p>
-            </div>
-            <div className={`rounded-xl border p-3 ${benefs.length - presents > 0 ? "bg-absences-light border-absences/20" : "bg-surface border-border"}`}>
-              <p className={`text-2xl font-bold ${benefs.length - presents > 0 ? "text-absences-dark" : "text-foreground"}`}>{benefs.length - presents}</p>
-              <p className={`text-xs mt-0.5 ${benefs.length - presents > 0 ? "text-absences-dark/70" : "text-muted"}`}>Absents / excusés</p>
-            </div>
-          </div>
-
-          <section className="bg-surface rounded-xl border border-border overflow-hidden">
-            <div className="px-5 py-3 border-b border-border">
-              <h2 className="font-semibold text-foreground text-sm">{session.titre}</h2>
-              <p className="text-xs text-muted mt-0.5">
-                {new Date(session.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} · {session.heure}
-                {session.salle && ` · ${session.salle}`}
-              </p>
-            </div>
-            {benefs.length === 0 ? (
-              <p className="text-center text-sm text-muted py-6 italic">Aucun bénéficiaire inscrit à cet atelier</p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {benefs.map(b => {
-                  const status = presences[b.id] ?? "présent"
-                  return (
-                    <li key={b.id} className="px-5 py-3 flex items-center gap-4">
-                      <div className="w-8 h-8 rounded-full bg-ateliers-light flex items-center justify-center shrink-0">
-                        <span className="text-xs font-bold text-ateliers-dark">{b.prenom[0]}{b.nom[0]}</span>
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-foreground text-sm">{b.prenom} {b.nom}</p>
-                        <p className="text-xs text-muted">{b.niveau}</p>
-                      </div>
-                      <button
-                        onClick={() => toggle(b.id)}
-                        title="Cliquer pour changer le statut"
-                        className={`text-xs font-medium px-3 py-1 rounded-full transition-all hover:opacity-80 ${presenceStyle[status]}`}
-                      >
-                        {status}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </section>
-        </>
       )}
     </div>
   )
@@ -330,7 +234,6 @@ function BeneficiairesTab({
 // ──────────────────────────────────────────────
 const TABS = [
   { id: "ateliers",      label: "Ateliers",       icon: CalendarDays },
-  { id: "presences",     label: "Présences",       icon: CheckCircle },
   { id: "beneficiaires", label: "Bénéficiaires",   icon: Users },
 ] as const
 
@@ -454,7 +357,6 @@ export default function AteliersPage() {
       </div>
 
       {tab === "ateliers"      && <AteliersTab sessions={sessions} beneficiaires={beneficiaires} benevoles={benevoles} onEdit={openEditSession} />}
-      {tab === "presences"     && <PresencesTab sessions={sessions} beneficiaires={beneficiaires} />}
       {tab === "beneficiaires" && <BeneficiairesTab beneficiaires={beneficiaires} sessions={sessions} onEdit={openEditBenef} />}
 
       {/* SlideOver — Atelier */}
