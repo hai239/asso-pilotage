@@ -452,7 +452,15 @@ export default function CommunicationPage() {
   const [generateError, setGenerateError] = useState<string | null>(null)
 
   useEffect(() => {
-    setPosts(load(STORAGE_POSTS, postsInitiaux))
+    const raw = load<Post[]>(STORAGE_POSTS, postsInitiaux)
+    // Migration : "en attente de validation" → "à valider"
+    const migrated = raw.map(p =>
+      (p.statut as string) === "en attente de validation" ? { ...p, statut: "à valider" as ValidationStatus } : p
+    )
+    if (migrated.some((p, i) => p !== raw[i])) {
+      localStorage.setItem(STORAGE_POSTS, JSON.stringify(migrated))
+    }
+    setPosts(migrated)
     setIntegrations(load(STORAGE_INTEGRATIONS, integrationsInitial))
     setSessions(load(S_SESSIONS, []))
     setBeneficiaires(load(S_BENEFICIAIRES, []))
@@ -968,7 +976,7 @@ export default function CommunicationPage() {
       <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg w-fit">
         {([
           { id: "calendrier",   icon: <Calendar size={14} />, label: "Calendrier" },
-          { id: "kanban",       icon: <Columns3 size={14} />, label: "Validation" },
+          { id: "kanban",       icon: <Columns3 size={14} />, label: "Suivi" },
           { id: "integrations", icon: <Shuffle size={14} />,  label: "Intégrations" },
         ] as const).map(t => (
           <button
