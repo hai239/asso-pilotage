@@ -363,11 +363,37 @@ export function saveBrouillon(b: Brouillon): void {
   localStorage.setItem(S_BROUILLON(b.atelierId), JSON.stringify(b))
 }
 
+/** Comble les champs ajoutés après-coup (outliers, ponderation, noteMin, noteMax)
+ *  pour qu'un brouillon stocké avant la mise à jour soit toujours lisible.
+ *  Sans ça, l'UI plante sur `brouillon.outliers.length` (undefined). */
+export function migrateBrouillon(raw: Partial<Brouillon> & { atelierId: number }): Brouillon {
+  return {
+    atelierId:   raw.atelierId,
+    generedAt:   raw.generedAt   ?? new Date().toISOString(),
+    groupes:     raw.groupes     ?? [],
+    aEvaluer:    raw.aEvaluer    ?? [],
+    horsTranche: raw.horsTranche ?? [],
+    exclusStatut:raw.exclusStatut?? [],
+    outliers:    raw.outliers    ?? [],
+    parametres: {
+      mode:              raw.parametres?.mode              ?? "homogène",
+      tailleGroupeCible: raw.parametres?.tailleGroupeCible ?? 10,
+      competencesCiblees:raw.parametres?.competencesCiblees?? [],
+      ponderation:       raw.parametres?.ponderation,
+      noteMin:           raw.parametres?.noteMin           ?? null,
+      noteMax:           raw.parametres?.noteMax           ?? null,
+      erreurs:           raw.parametres?.erreurs           ?? [],
+    },
+  }
+}
+
 export function loadBrouillon(atelierId: number): Brouillon | null {
   if (typeof window === "undefined") return null
   try {
     const s = localStorage.getItem(S_BROUILLON(atelierId))
-    return s ? (JSON.parse(s) as Brouillon) : null
+    if (!s) return null
+    const raw = JSON.parse(s) as Partial<Brouillon> & { atelierId: number }
+    return migrateBrouillon(raw)
   } catch {
     return null
   }
