@@ -2,12 +2,13 @@
 
 import { useState, useMemo, useEffect } from "react"
 import { communication } from "@/lib/mock-data"
-import { Calendar, Columns3, Check, X, RotateCcw, Plus, Pencil, CalendarDays, Shuffle, CheckCircle2, XCircle } from "lucide-react"
+import { Calendar, Columns3, Check, X, RotateCcw, Plus, Pencil, CalendarDays, Shuffle, CheckCircle2, XCircle, ChevronRight } from "lucide-react"
 import SlideOver, { Field, Input, Textarea, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 
 const STORAGE_POSTS         = "asso-communication-posts"
 const STORAGE_EVENTS        = "asso-communication-events"
 const STORAGE_INTEGRATIONS  = "asso-communication-integrations"
+const STORAGE_REJECTED      = "asso-communication-rejected"
 
 function load<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback
@@ -17,7 +18,7 @@ function load<T>(key: string, fallback: T): T {
 // ──────────────────────────────────────────────
 // Types & données
 // ──────────────────────────────────────────────
-type ValidationStatus = "brouillon" | "soumis" | "approuvé" | "refusé" | "publié"
+type ValidationStatus = "brouillon" | "soumis" | "approuvé" | "publié"
 type Plateforme = "LinkedIn" | "Instagram" | "Facebook"
 type TypeEvenement = "atelier" | "événement" | "cérémonie"
 
@@ -64,8 +65,8 @@ const postsInitiaux: Post[] = [
 
 const KANBAN_COLS: { id: ValidationStatus; label: string; color: string }[] = [
   { id: "brouillon", label: "Brouillon",  color: "bg-slate-100 border-slate-200" },
-  { id: "soumis",    label: "Soumis",     color: "bg-ateliers-light border-ateliers/30" },
-  { id: "approuvé",  label: "Approuvé",   color: "bg-finances-light border-finances/30" },
+  { id: "soumis",    label: "Soumis",     color: "bg-absences-light border-absences/30" },
+  { id: "approuvé",  label: "Approuvé",   color: "bg-indigo-50 border-indigo-200" },
   { id: "publié",    label: "Publié",     color: "bg-emerald-50 border-emerald-200" },
 ]
 
@@ -84,11 +85,31 @@ const plateformeStyle: Record<Plateforme, string> = {
 // ──────────────────────────────────────────────
 // Calendrier éditorial (4.1)
 // ──────────────────────────────────────────────
-function CalendrierTab({ posts, evenements }: { posts: Post[]; evenements: Evenement[] }) {
+function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: string) => void }) {
   const today = new Date("2026-05-20")
-  const year = today.getFullYear()
-  const month = today.getMonth()
-  const monthLabel = today.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
+  const [displayYear, setDisplayYear] = useState(today.getFullYear())
+  const [displayMonth, setDisplayMonth] = useState(today.getMonth())
+
+  const year = displayYear
+  const month = displayMonth
+  const monthLabel = new Date(year, month, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
+
+  const minDate = new Date(today.getFullYear() - 1, today.getMonth(), 1)
+  const maxDate = new Date(today.getFullYear() + 2, today.getMonth(), 1)
+  const canGoPrev = new Date(year, month - 1, 1) >= minDate
+  const canGoNext = new Date(year, month + 1, 1) <= maxDate
+
+  function prevMonth() {
+    if (!canGoPrev) return
+    if (month === 0) { setDisplayYear(y => y - 1); setDisplayMonth(11) }
+    else { setDisplayMonth(m => m - 1) }
+  }
+
+  function nextMonth() {
+    if (!canGoNext) return
+    if (month === 11) { setDisplayYear(y => y + 1); setDisplayMonth(0) }
+    else { setDisplayMonth(m => m + 1) }
+  }
 
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -105,19 +126,20 @@ function CalendrierTab({ posts, evenements }: { posts: Post[]; evenements: Evene
       }
     })
     return map
-  }, [posts])
-
-  const events = evenements.filter((e) => {
-    const d = new Date(e.date)
-    return d.getFullYear() === year && d.getMonth() === month
-  })
+  }, [posts, year, month])
 
   const statutDot: Record<ValidationStatus, string> = {
     brouillon: "bg-slate-300",
-    soumis:    "bg-ateliers",
-    approuvé:  "bg-finances",
-    refusé:    "bg-alert",
+    soumis:    "bg-absences",
+    approuvé:  "bg-indigo-600",
     publié:    "bg-emerald-500",
+  }
+
+  const statutBg: Record<ValidationStatus, string> = {
+    brouillon: "bg-slate-100 text-slate-600",
+    soumis:    "bg-absences-light text-absences-dark",
+    approuvé:  "bg-indigo-100 text-indigo-700",
+    publié:    "bg-emerald-50 text-emerald-700",
   }
 
   const cells: (number | null)[] = [...Array(offset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
@@ -126,9 +148,25 @@ function CalendrierTab({ posts, evenements }: { posts: Post[]; evenements: Evene
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold capitalize text-foreground">{monthLabel}</h2>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={prevMonth}
+            disabled={!canGoPrev}
+            className="p-1 rounded-lg hover:bg-slate-100 text-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+          <h2 className="text-base font-semibold capitalize text-foreground w-44 text-center">{monthLabel}</h2>
+          <button
+            onClick={nextMonth}
+            disabled={!canGoNext}
+            className="p-1 rounded-lg hover:bg-slate-100 text-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
         <div className="flex items-center gap-3 text-xs text-muted">
-          {Object.entries(statutDot).slice(0, 4).map(([s, c]) => (
+          {Object.entries(statutDot).map(([s, c]) => (
             <span key={s} className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${c}`} />{s}</span>
           ))}
         </div>
@@ -143,21 +181,26 @@ function CalendrierTab({ posts, evenements }: { posts: Post[]; evenements: Evene
       <div className="grid grid-cols-7 gap-1">
         {cells.map((day, i) => {
           if (!day) return <div key={i} />
-          const todayNum = today.getDate()
-          const isToday = day === todayNum
+          const isToday = day === today.getDate() && year === today.getFullYear() && month === today.getMonth()
           const dayPosts = postsByDay[day] ?? []
-          const dayEvents = events.filter((e) => new Date(e.date).getDate() === day)
+
+          const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
 
           return (
-            <div key={i} className={`min-h-24 rounded-lg border p-1.5 text-xs ${isToday ? "border-ateliers bg-ateliers-light" : "border-border bg-surface hover:bg-slate-50"}`}>
+            <div
+              key={i}
+              onClick={() => onNewPost(dateStr)}
+              className={`min-h-24 rounded-lg border p-1.5 text-xs cursor-pointer ${isToday ? "border-ateliers bg-ateliers-light hover:bg-ateliers-light/80" : "border-border bg-surface hover:bg-slate-50"}`}
+            >
               <div className={`font-semibold mb-1 ${isToday ? "text-ateliers-dark" : "text-muted"}`}>{day}</div>
-              {dayEvents.map((e) => (
-                <div key={e.id} className="text-[10px] bg-absences-light text-absences-dark rounded px-1 py-0.5 mb-0.5 truncate font-medium">{e.nom}</div>
-              ))}
               {dayPosts.map((p) => (
-                <div key={p.id} className="flex items-center gap-1 mb-0.5">
+                <div
+                  key={p.id}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`flex items-center gap-1 mb-0.5 px-1 py-0.5 rounded ${statutBg[p.statut]}`}
+                >
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statutDot[p.statut]}`} />
-                  <span className="truncate text-[10px] text-foreground">{p.titre}</span>
+                  <span className="truncate text-[10px] font-medium">{p.titre}</span>
                 </div>
               ))}
             </div>
@@ -165,16 +208,6 @@ function CalendrierTab({ posts, evenements }: { posts: Post[]; evenements: Evene
         })}
       </div>
 
-      {/* Légende événements — filtrée au mois affiché */}
-      {events.length > 0 && (
-        <div className="flex gap-3 flex-wrap text-xs text-muted pt-2">
-          {events.map((e) => (
-            <span key={e.id} className="flex items-center gap-1.5 bg-absences-light text-absences-dark px-2 py-1 rounded-full">
-              📅 {e.nom} · {new Date(e.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -248,9 +281,8 @@ function EventsTab({ events, onEdit, onNew }: {
 // ──────────────────────────────────────────────
 const statutLabel: Record<ValidationStatus, { label: string; cls: string }> = {
   brouillon: { label: "Brouillon",  cls: "bg-slate-100 text-slate-600" },
-  soumis:    { label: "Soumis",     cls: "bg-ateliers-light text-ateliers-dark" },
-  approuvé:  { label: "Approuvé",   cls: "bg-finances-light text-finances-dark" },
-  refusé:    { label: "Refusé",     cls: "bg-red-50 text-alert" },
+  soumis:    { label: "Soumis",     cls: "bg-absences-light text-absences-dark" },
+  approuvé:  { label: "Approuvé",   cls: "bg-indigo-100 text-indigo-700" },
   publié:    { label: "Publié",     cls: "bg-emerald-50 text-emerald-700" },
 }
 
@@ -309,8 +341,9 @@ function PostReadSlideOver({ post, onClose, onEdit }: { post: Post | null; onClo
 // ──────────────────────────────────────────────
 // Kanban de validation (4.2)
 // ──────────────────────────────────────────────
-function KanbanTab({ posts, onChangeStatus, onEdit, onRead }: {
+function KanbanTab({ posts, rejectedIds, onChangeStatus, onEdit, onRead }: {
   posts: Post[]
+  rejectedIds: number[]
   onChangeStatus: (id: number, status: ValidationStatus) => void
   onEdit: (p: Post) => void
   onRead: (p: Post) => void
@@ -335,8 +368,11 @@ function KanbanTab({ posts, onChangeStatus, onEdit, onRead }: {
                 <div
                   key={p.id}
                   onClick={() => onRead(p)}
-                  className="bg-white rounded-xl p-3 shadow-sm border border-white flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-slate-200 transition-all group"
+                  className="relative bg-white rounded-xl p-3 shadow-sm border border-white flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-slate-200 transition-all group"
                 >
+                  {rejectedIds.includes(p.id) && (
+                    <span className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-red-500 border-2 border-white" />
+                  )}
                   <div className="flex items-start justify-between gap-1">
                     <p className="text-xs font-semibold text-foreground leading-snug flex-1 group-hover:text-ateliers-dark transition-colors">{p.titre}</p>
                     <button
@@ -346,7 +382,6 @@ function KanbanTab({ posts, onChangeStatus, onEdit, onRead }: {
                       <Pencil size={11} />
                     </button>
                   </div>
-                  {p.contenu && <p className="text-[11px] text-muted leading-relaxed line-clamp-3">{p.contenu}</p>}
                   <div className="flex flex-wrap gap-1">
                     {p.plateforme.map((pl) => (
                       <span key={pl} className={`flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${plateformeStyle[pl]}`}>
@@ -354,9 +389,8 @@ function KanbanTab({ posts, onChangeStatus, onEdit, onRead }: {
                       </span>
                     ))}
                   </div>
-                  <div className="flex items-center justify-between text-[10px] text-muted">
-                    <span>{p.auteur}</span>
-                    <span>{new Date(p.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>
+                  <div className="text-[10px] text-muted">
+                    {new Date(p.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
                   </div>
                   {/* Actions */}
                   <div className="flex gap-1.5 mt-1" onClick={(e) => e.stopPropagation()}>
@@ -605,15 +639,20 @@ export default function CommunicationPage() {
   const [integrations, setIntegrations] = useState<IntegrationsConfig>(integrationsInitial)
   const [webhookTestStatus, setWebhookTestStatus] = useState<"idle" | "sending" | "ok" | "error">("idle")
 
+  // Posts renvoyés en brouillon depuis soumis
+  const [rejectedIds, setRejectedIds] = useState<number[]>([])
+
   useEffect(() => {
     setPosts(load(STORAGE_POSTS, postsInitiaux))
     setEvents(load(STORAGE_EVENTS, eventsInitiaux))
     setIntegrations(load(STORAGE_INTEGRATIONS, integrationsInitial))
+    setRejectedIds(load(STORAGE_REJECTED, []))
   }, [])
 
   function persistPosts(data: Post[]) { setPosts(data); localStorage.setItem(STORAGE_POSTS, JSON.stringify(data)) }
   function persistEvents(data: Evenement[]) { setEvents(data); localStorage.setItem(STORAGE_EVENTS, JSON.stringify(data)) }
   function persistIntegrations(data: IntegrationsConfig) { setIntegrations(data); localStorage.setItem(STORAGE_INTEGRATIONS, JSON.stringify(data)) }
+  function persistRejected(data: number[]) { setRejectedIds(data); localStorage.setItem(STORAGE_REJECTED, JSON.stringify(data)) }
 
   // ── Webhook ───────────────────────────────
   async function triggerWebhook(post: Post) {
@@ -660,13 +699,23 @@ export default function CommunicationPage() {
 
   // ── Posts CRUD ────────────────────────────
   function changeStatus(id: number, status: ValidationStatus) {
+    const current = posts.find((p) => p.id === id)
     const updated = posts.map((p) => p.id === id ? { ...p, statut: status } : p)
     persistPosts(updated)
+
+    // Dot rouge : soumis → brouillon = ajouter ; brouillon → soumis = retirer
+    if (current?.statut === "soumis" && status === "brouillon") {
+      persistRejected([...rejectedIds, id])
+    } else if (current?.statut === "brouillon" && status === "soumis") {
+      persistRejected(rejectedIds.filter((rid) => rid !== id))
+    }
+
     const post = updated.find((p) => p.id === id)
     if (post) triggerWebhook({ ...post, statut: status })
   }
 
   function openNew() { setEditing(null); setForm(emptyPost()); setSlideOpen(true) }
+  function openNewWithDate(date: string) { setEditing(null); setForm({ ...emptyPost(), date }); setSlideOpen(true) }
   function openEdit(p: Post) { setEditing(p); setForm({ ...p, plateforme: [...p.plateforme] }); setSlideOpen(true) }
 
   function handleSave() {
@@ -708,9 +757,11 @@ export default function CommunicationPage() {
   }
 
   // ── Stats ─────────────────────────────────
-  const aCreer    = posts.filter((p) => p.statut === "brouillon" || p.statut === "soumis").length
-  const approuves = posts.filter((p) => p.statut === "approuvé").length
-  const publies   = posts.filter((p) => p.statut === "publié").length
+  const currentYear      = new Date().getFullYear()
+  const debutAnnee       = new Date(currentYear, 0, 1)
+  const nbBrouillons     = posts.filter((p) => p.statut === "brouillon").length
+  const nbSoumis         = posts.filter((p) => p.statut === "soumis").length
+  const nbPubliesAnnee   = posts.filter((p) => p.statut === "publié" && new Date(p.date) >= debutAnnee).length
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -794,17 +845,17 @@ export default function CommunicationPage() {
       </SlideOver>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-communication-light rounded-xl border border-communication/20 p-4">
-          <p className="text-3xl font-bold text-communication-dark">{aCreer}</p>
-          <p className="text-sm text-communication-dark/70 mt-1">En cours de rédaction</p>
+        <div className="bg-slate-100 rounded-xl border border-slate-200 p-4">
+          <p className="text-3xl font-bold text-slate-700">{nbBrouillons}</p>
+          <p className="text-sm text-slate-500 mt-1">En cours de rédaction</p>
         </div>
-        <div className="bg-finances-light rounded-xl border border-finances/20 p-4">
-          <p className="text-3xl font-bold text-finances-dark">{approuves}</p>
-          <p className="text-sm text-finances-dark/70 mt-1">Approuvés à publier</p>
+        <div className="bg-absences-light rounded-xl border border-absences/20 p-4">
+          <p className="text-3xl font-bold text-absences-dark">{nbSoumis}</p>
+          <p className="text-sm text-absences-dark/70 mt-1">En attente de validation</p>
         </div>
-        <div className="bg-surface rounded-xl border border-border p-4">
-          <p className="text-3xl font-bold text-foreground">{events.length}</p>
-          <p className="text-sm text-muted mt-1">Événements programmés</p>
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
+          <p className="text-3xl font-bold text-emerald-700">{nbPubliesAnnee}</p>
+          <p className="text-sm text-emerald-600/70 mt-1">Publiés en {currentYear}</p>
         </div>
       </div>
 
@@ -839,8 +890,8 @@ export default function CommunicationPage() {
         </button>
       </div>
 
-      {tab === "calendrier"   && <CalendrierTab posts={posts} evenements={events} />}
-      {tab === "kanban"       && <KanbanTab posts={posts} onChangeStatus={changeStatus} onEdit={openEdit} onRead={(p) => setViewingPost(p)} />}
+      {tab === "calendrier"   && <CalendrierTab posts={posts} onNewPost={openNewWithDate} />}
+      {tab === "kanban"       && <KanbanTab posts={posts} rejectedIds={rejectedIds} onChangeStatus={changeStatus} onEdit={openEdit} onRead={(p) => setViewingPost(p)} />}
       {tab === "evenements"   && <EventsTab events={events} onEdit={openEditEvent} onNew={openNewEvent} />}
       {tab === "integrations" && <IntegrationsTab config={integrations} onChange={persistIntegrations} onTest={testWebhook} testStatus={webhookTestStatus} />}
 
