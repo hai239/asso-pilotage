@@ -15,10 +15,15 @@ import {
   encadrantsRequis,
   type FicheAtelier,
 } from "@/lib/atelier"
+import {
+  composerGroupes,
+  saveBrouillon,
+  type BeneficiairePourGroupage,
+} from "@/lib/group-composer"
 import Link from "next/link"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
-  X, Columns3, Check, AlertTriangle,
+  X, Columns3, Check, AlertTriangle, Sparkles,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -456,6 +461,14 @@ type TabId = (typeof TABS)[number]["id"]
 
 export default function AteliersPage() {
   const [tab, setTab] = useState<TabId>("ateliers")
+  const [toast, setToast] = useState<{ message: string; href: string } | null>(null)
+
+  // Auto-effacement du toast après 6 s
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 6000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   // ── Sessions ──
   const [sessions, setSessions]         = useState<Session[]>(ateliersMock.sessions as Session[])
@@ -500,10 +513,30 @@ export default function AteliersPage() {
     setSessionSlide(true)
   }
   function handleSaveSession() {
+    const isNew = !editingSession
+    const id = editingSession ? editingSession.id : Date.now()
+    const nouvelle: Session = { ...sessionForm, id }
     const updated = editingSession
-      ? sessions.map(x => x.id === editingSession.id ? { ...sessionForm, id: editingSession.id } : x)
-      : [...sessions, { ...sessionForm, id: Date.now() }]
+      ? sessions.map(x => x.id === id ? nouvelle : x)
+      : [...sessions, nouvelle]
     persistSessions(updated); setSessionSlide(false)
+
+    // Auto-génération du brouillon de groupes pour un NOUVEL atelier qui a au
+    // moins une compétence cochée. Ça démarre le travail pour la collaboratrice
+    // sans qu'elle ait à aller cliquer sur "Générer" depuis l'onglet brouillon.
+    if (isNew && nouvelle.competencesCiblees.length > 0) {
+      const inputs: BeneficiairePourGroupage[] = beneficiaires.map(b => ({
+        id: b.id, prenom: b.prenom, nom: b.nom,
+        dateNaissance: b.dateNaissance, statut: b.statut,
+        positionnementInitial: b.positionnementInitial,
+      }))
+      const brouillon = composerGroupes(nouvelle, inputs)
+      saveBrouillon(brouillon)
+      setToast({
+        message: `Brouillon généré : ${brouillon.groupes.length} groupe${brouillon.groupes.length > 1 ? "s" : ""} proposé${brouillon.groupes.length > 1 ? "s" : ""}.`,
+        href: "/brouillon-groupes",
+      })
+    }
   }
   function handleDeleteSession() {
     if (!editingSession) return
@@ -1037,6 +1070,23 @@ export default function AteliersPage() {
         </form>
       </SlideOver>
 
+      {/* Toast — brouillon généré automatiquement */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-amber-500 text-white rounded-xl shadow-2xl px-5 py-4 flex items-center gap-3 max-w-md animate-in slide-in-from-bottom-2">
+          <Sparkles size={18} />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold">Brouillon de groupes prêt</p>
+            <p className="text-xs opacity-90">{toast.message}</p>
+          </div>
+          <Link
+            href={toast.href}
+            onClick={() => setToast(null)}
+            className="text-xs font-semibold bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg whitespace-nowrap"
+          >
+            Voir →
+          </Link>
+        </div>
+      )}
     </div>
   )
 }
