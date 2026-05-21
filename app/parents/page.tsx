@@ -13,10 +13,11 @@ import {
   type TypeBeneficiaire,
 } from "@/lib/positionnement"
 import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
-import { Plus, Pencil, Search, Phone, GraduationCap, Users, X, AlertTriangle } from "lucide-react"
+import { Pencil, Search, GraduationCap, Users, UserCheck, X, AlertTriangle } from "lucide-react"
 
 // ──────────────────────────────────────────────
-// Types
+// Types (alignés avec /beneficiaires — un seul modèle Beneficiaire avec
+// discriminateur `type`. La page /parents filtre type=parent.)
 // ──────────────────────────────────────────────
 type NiveauBenef = "débutant" | "intermédiaire" | "avancé"
 type StatutBenef = "actif" | "diplômé" | "abandon"
@@ -38,26 +39,13 @@ interface Beneficiaire {
   niveau: NiveauBenef
   notes: string
   statut: StatutBenef
-  /** Pour un élève : ids des parents Beneficiaire (type=parent) qui le rattachent.
-   *  Pour un parent : vide (le lien est porté par la fiche élève). */
   parentIds: number[]
 }
 
-interface Groupe {
-  id: number
-  nom: string
-  type: string
-  description: string
-  beneficiaireIds: number[]
-}
-
 // ──────────────────────────────────────────────
-// Storage
+// Storage — partagé avec /beneficiaires (un seul modèle de données).
 // ──────────────────────────────────────────────
-const S_BENEF   = "asso-beneficiaires"
-const S_GROUPES = "asso-groupes"
-const S_PRESENCES = (id: number) => `asso-presences-atelier-${id}`
-const S_SESSIONS  = "asso-ateliers-sessions"
+const S_BENEF = "asso-beneficiaires"
 
 function load<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback
@@ -65,7 +53,7 @@ function load<T>(key: string, fallback: T): T {
 }
 
 // ──────────────────────────────────────────────
-// Helpers
+// Helpers (mêmes que /beneficiaires, ré-utilisés tels quels pour cohérence)
 // ──────────────────────────────────────────────
 function computeAge(dateNaissance: string): number | null {
   if (!dateNaissance) return null
@@ -87,12 +75,7 @@ function noteColor(note: number | null): string {
   return "bg-green-100 text-green-700"
 }
 
-/** Helper local pour màj une note ciblée dans le formulaire. */
-function setNote(
-  notes: NotesPositionnement,
-  key: Thematique,
-  value: string,
-): NotesPositionnement {
+function setNote(notes: NotesPositionnement, key: Thematique, value: string): NotesPositionnement {
   const v = value === "" ? null : Math.max(0, Math.min(20, Number(value)))
   return { ...notes, [key]: v }
 }
@@ -114,7 +97,7 @@ const statutStyle: Record<StatutBenef, string> = {
 }
 
 const empty = (): Omit<Beneficiaire, "id"> => ({
-  type: "eleve",
+  type: "parent",
   prenom: "", nom: "", dateNaissance: "", email: "", telephone: "",
   nomParent: "", telephoneParent: "", emailParent: "",
   dateInscription: new Date().toISOString().split("T")[0],
@@ -127,25 +110,24 @@ const empty = (): Omit<Beneficiaire, "id"> => ({
 // ──────────────────────────────────────────────
 // Page
 // ──────────────────────────────────────────────
-export default function BeneficiairesPage() {
-  const [beneficiaires, setBenef]   = useState<Beneficiaire[]>(ateliersMock.beneficiaires as Beneficiaire[])
-  const [groupes, setGroupes]       = useState<Groupe[]>(ateliersMock.groupes as Groupe[])
-  const [sessions, setSessions]     = useState<{ id: number; beneficiaireIds: number[]; statut: string }[]>(ateliersMock.sessions)
+export default function ParentsPage() {
+  const [beneficiaires, setBenef] = useState<Beneficiaire[]>(ateliersMock.beneficiaires as Beneficiaire[])
 
-  const [search, setSearch]         = useState("")
-  const [filterStatut, setFilterStatut] = useState<StatutBenef | "tous">("tous")
-  const [filterNiveau, setFilterNiveau] = useState<NiveauBenef | "tous">("tous")
+  const [search, setSearch]               = useState("")
+  const [filterStatut, setFilterStatut]   = useState<StatutBenef | "tous">("tous")
+  const [filterNiveau, setFilterNiveau]   = useState<NiveauBenef | "tous">("tous")
 
-  const [slideOpen, setSlideOpen]   = useState(false)
-  const [editing, setEditing]       = useState<Beneficiaire | null>(null)
-  const [form, setForm]             = useState<Omit<Beneficiaire, "id">>(empty())
+  const [slideOpen, setSlideOpen] = useState(false)
+  const [editing, setEditing]     = useState<Beneficiaire | null>(null)
+  const [form, setForm]           = useState<Omit<Beneficiaire, "id">>(empty())
+  // Liste des enfants liés à ce parent (ids des Beneficiaires type=eleve).
+  // Cet état est local au SlideOver et propage au save vers les parentIds
+  // des élèves concernés (le lien est porté côté élève, jamais dupliqué).
+  const [selectedEnfantIds, setSelectedEnfantIds] = useState<number[]>([])
 
   useEffect(() => {
-    // Migration auto si la donnée vient de l'ancien format (avant le Lot 1).
     const raw = load<Beneficiaire[]>(S_BENEF, ateliersMock.beneficiaires as Beneficiaire[])
     setBenef(raw.map(b => migrateBenef(b) as Beneficiaire))
-    setGroupes(load(S_GROUPES, ateliersMock.groupes as Groupe[]))
-    setSessions(load(S_SESSIONS, ateliersMock.sessions))
   }, [])
 
   function persist(data: Beneficiaire[]) {
@@ -153,55 +135,85 @@ export default function BeneficiairesPage() {
     localStorage.setItem(S_BENEF, JSON.stringify(data))
   }
 
-  function openNew() { setEditing(null); setForm(empty()); setSlideOpen(true) }
-  function openEdit(b: Beneficiaire) { setEditing(b); setForm({ ...b }); setSlideOpen(true) }
+  /** Renvoie les ids des élèves qui ont ce parent dans leur parentIds. */
+  function getEnfantIds(parentId: number): number[] {
+    return beneficiaires
+      .filter(b => b.type === "eleve" && b.parentIds.includes(parentId))
+      .map(b => b.id)
+  }
+
+  function openNew() {
+    setEditing(null)
+    setForm(empty())
+    setSelectedEnfantIds([])
+    setSlideOpen(true)
+  }
+
+  function openEdit(b: Beneficiaire) {
+    setEditing(b)
+    setForm({ ...b })
+    setSelectedEnfantIds(getEnfantIds(b.id))
+    setSlideOpen(true)
+  }
 
   function handleSave() {
-    const updated = editing
-      ? beneficiaires.map(x => x.id === editing.id ? { ...form, id: editing.id } : x)
-      : [...beneficiaires, { ...form, id: Date.now() }]
+    // 1. Sauvegarde / création de la fiche parent elle-même.
+    const id = editing ? editing.id : Date.now()
+    const fiche: Beneficiaire = { ...form, id }
+    let updated = editing
+      ? beneficiaires.map(x => x.id === editing.id ? fiche : x)
+      : [...beneficiaires, fiche]
+
+    // 2. Synchronisation du lien parent ↔ enfant.
+    // Le lien est porté côté élève (parentIds). On compare l'état précédent
+    // (calculé) à l'état souhaité (selectedEnfantIds) et on met à jour les
+    // élèves concernés en cascade.
+    const previousEnfantIds = editing ? getEnfantIds(editing.id) : []
+    const ajoutes  = selectedEnfantIds.filter(eid => !previousEnfantIds.includes(eid))
+    const retires  = previousEnfantIds.filter(eid => !selectedEnfantIds.includes(eid))
+
+    updated = updated.map(b => {
+      if (b.type !== "eleve") return b
+      if (ajoutes.includes(b.id) && !b.parentIds.includes(id)) {
+        return { ...b, parentIds: [...b.parentIds, id] }
+      }
+      if (retires.includes(b.id)) {
+        return { ...b, parentIds: b.parentIds.filter(p => p !== id) }
+      }
+      return b
+    })
+
     persist(updated)
     setSlideOpen(false)
   }
 
   function handleDelete() {
     if (!editing) return
-    persist(beneficiaires.filter(x => x.id !== editing.id))
+    // Avant de supprimer le parent, on enlève la référence dans les parentIds
+    // des élèves qui le pointaient.
+    const updated = beneficiaires
+      .filter(x => x.id !== editing.id)
+      .map(b => b.type === "eleve" && b.parentIds.includes(editing.id)
+        ? { ...b, parentIds: b.parentIds.filter(p => p !== editing.id) }
+        : b,
+      )
+    persist(updated)
     setSlideOpen(false)
   }
 
-  // Derived stats on benef
-  function getGroupes(id: number): Groupe[] {
-    return groupes.filter(g => g.beneficiaireIds.includes(id))
-  }
-
-  function getSessionStats(id: number): { total: number; absences: number } {
-    const participated = sessions.filter(s => s.beneficiaireIds.includes(id))
-    let absences = 0
-    participated
-      .filter(s => s.statut === "terminé")
-      .forEach(s => {
-        const p = load<Record<number, string>>(S_PRESENCES(s.id), {})
-        if (p[id] === "absent") absences++
-      })
-    return { total: participated.length, absences }
-  }
-
-  // Pool des parents (Beneficiaires type=parent) — utilisée pour le multi-select
-  // "Parents rattachés" dans le SlideOver d'édition d'un élève.
-  const parentsDisponibles = beneficiaires
-    .filter(b => b.type === "parent")
+  // Pool des élèves disponibles pour la liaison (uniquement actifs et diplômés
+  // — on évite les "abandon" qui sont moins pertinents).
+  const elevesDisponibles = beneficiaires
+    .filter(b => b.type === "eleve")
     .sort((a, b) => a.nom.localeCompare(b.nom))
 
-  // Filters — la liste affichée n'inclut QUE les élèves (les parents ont leur
-  // propre page /parents). Les autres filtres s'appliquent ensuite.
+  // Filters — la liste affichée n'inclut QUE les parents.
   const filtered = beneficiaires.filter(b => {
-    if (b.type !== "eleve") return false
+    if (b.type !== "parent") return false
     const q = search.toLowerCase()
     const matchSearch = !q ||
       b.prenom.toLowerCase().includes(q) ||
-      b.nom.toLowerCase().includes(q) ||
-      b.nomParent.toLowerCase().includes(q)
+      b.nom.toLowerCase().includes(q)
     const matchStatut = filterStatut === "tous" || b.statut === filterStatut
     const matchNiveau = filterNiveau === "tous" || b.niveau === filterNiveau
     return matchSearch && matchStatut && matchNiveau
@@ -215,30 +227,36 @@ export default function BeneficiairesPage() {
     <div className="p-8 max-w-5xl mx-auto">
       <header className="mb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Bénéficiaires</h1>
-          <p className="text-sm text-muted mt-1">Fiches d'inscription, contacts parents et suivi des ateliers</p>
+          <h1 className="text-2xl font-bold text-foreground">Parents</h1>
+          <p className="text-sm text-muted mt-1">
+            Fiches des parents bénéficiaires (ateliers adultes) et liens vers les enfants.
+          </p>
         </div>
         <button
           onClick={openNew}
           className="flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
         >
-          <Plus size={14} /> Nouveau bénéficiaire
+          <UserCheck size={14} /> Nouveau parent
         </button>
       </header>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-ateliers-light rounded-xl border border-ateliers/20 p-4">
-          <p className="text-3xl font-bold text-ateliers-dark">{beneficiaires.filter(b => b.statut === "actif").length}</p>
-          <p className="text-sm text-ateliers-dark/70 mt-1">Actifs</p>
+        <div className="bg-communication-light rounded-xl border border-communication/20 p-4">
+          <p className="text-3xl font-bold text-communication-dark">{filtered.length}</p>
+          <p className="text-sm text-communication-dark/70 mt-1">Parents enregistrés</p>
         </div>
         <div className="bg-surface rounded-xl border border-border p-4">
-          <p className="text-3xl font-bold text-foreground">{beneficiaires.filter(b => b.statut === "diplômé").length}</p>
-          <p className="text-sm text-muted mt-1">Diplômés</p>
+          <p className="text-3xl font-bold text-foreground">
+            {filtered.filter(p => getEnfantIds(p.id).length > 0).length}
+          </p>
+          <p className="text-sm text-muted mt-1">Avec enfant(s) rattaché(s)</p>
         </div>
         <div className="bg-surface rounded-xl border border-border p-4">
-          <p className="text-3xl font-bold text-foreground">{beneficiaires.length}</p>
-          <p className="text-sm text-muted mt-1">Total</p>
+          <p className="text-3xl font-bold text-foreground">
+            {beneficiaires.filter(b => b.type === "parent" && b.statut === "actif").length}
+          </p>
+          <p className="text-sm text-muted mt-1">Actifs</p>
         </div>
       </div>
 
@@ -248,13 +266,13 @@ export default function BeneficiairesPage() {
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
-            placeholder="Rechercher par nom, prénom, parent…"
+            placeholder="Rechercher par nom ou prénom…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
           />
           {search && (
-            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground" aria-label="Effacer la recherche">
+            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground" aria-label="Effacer">
               <X size={13} />
             </button>
           )}
@@ -297,46 +315,43 @@ export default function BeneficiairesPage() {
       {/* List */}
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-muted">
-          <Users size={36} className="mx-auto mb-3 opacity-20" />
-          <p className="text-sm">{search ? "Aucun résultat pour cette recherche." : "Aucun bénéficiaire enregistré."}</p>
+          <UserCheck size={36} className="mx-auto mb-3 opacity-20" />
+          <p className="text-sm">{search ? "Aucun résultat pour cette recherche." : "Aucun parent enregistré."}</p>
         </div>
       ) : (
         <div className="bg-surface rounded-xl border border-border overflow-hidden">
           <div className="px-5 py-3 border-b border-border">
-            <p className="text-xs text-muted">{filtered.length} bénéficiaire{filtered.length > 1 ? "s" : ""}</p>
+            <p className="text-xs text-muted">{filtered.length} parent{filtered.length > 1 ? "s" : ""}</p>
           </div>
           <ul className="divide-y divide-border">
-            {filtered.map(b => {
-              const age         = computeAge(b.dateNaissance)
-              const benGroups   = getGroupes(b.id)
-              const { total, absences } = getSessionStats(b.id)
-
+            {filtered.map(p => {
+              const age      = computeAge(p.dateNaissance)
+              const enfants  = beneficiaires.filter(b => b.type === "eleve" && b.parentIds.includes(p.id))
               return (
-                <li key={b.id} className="px-5 py-4 flex items-start gap-4 hover:bg-slate-50 group">
+                <li key={p.id} className="px-5 py-4 flex items-start gap-4 hover:bg-slate-50 group">
                   {/* Avatar */}
-                  <div className="w-11 h-11 rounded-full bg-ateliers-light flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-sm font-bold text-ateliers-dark">{initials(b.prenom, b.nom)}</span>
+                  <div className="w-11 h-11 rounded-full bg-communication-light flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-sm font-bold text-communication-dark">{initials(p.prenom, p.nom)}</span>
                   </div>
 
                   {/* Main info */}
                   <div className="flex-1 min-w-0">
-                    {/* Nom + age + statut */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-foreground">{b.prenom} {b.nom}</p>
+                      <p className="font-semibold text-foreground">{p.prenom} {p.nom}</p>
                       {age !== null && <span className="text-xs text-muted">{age} ans</span>}
-                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statutStyle[b.statut]}`}>{b.statut}</span>
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statutStyle[p.statut]}`}>{p.statut}</span>
                     </div>
 
-                    {/* Évaluation + niveau */}
+                    {/* Notes / niveau */}
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      {notesIsEmpty(b.positionnementInitial) ? (
+                      {notesIsEmpty(p.positionnementInitial) ? (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1">
                           <AlertTriangle size={10} /> À évaluer avant attribution
                         </span>
                       ) : (
                         <>
                           {THEMATIQUES.map(t => {
-                            const n = b.positionnementInitial[t.key]
+                            const n = p.positionnementInitial[t.key]
                             return (
                               <span
                                 key={t.key}
@@ -349,48 +364,31 @@ export default function BeneficiairesPage() {
                           })}
                         </>
                       )}
-                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${niveauStyle[b.niveau]}`}>
-                        {b.niveau}
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${niveauStyle[p.niveau]}`}>
+                        {p.niveau}
                       </span>
                     </div>
 
-                    {/* Contact parent */}
-                    {(b.nomParent || b.telephoneParent) && (
-                      <div className="flex items-center gap-2 mt-1.5 text-xs text-muted">
-                        <span className="font-medium">{b.nomParent}</span>
-                        {b.telephoneParent && (
-                          <a href={`tel:${b.telephoneParent.replace(/\s/g, "")}`}
-                            className="flex items-center gap-1 text-ateliers-dark hover:underline"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <Phone size={10} /> {b.telephoneParent}
-                          </a>
-                        )}
+                    {/* Enfants rattachés */}
+                    {enfants.length > 0 && (
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        <GraduationCap size={11} className="text-ateliers-dark" />
+                        {enfants.map(e => (
+                          <span key={e.id} className="text-[10px] bg-ateliers-light text-ateliers-dark px-1.5 py-0.5 rounded-full">
+                            {e.prenom} {e.nom}
+                          </span>
+                        ))}
                       </div>
                     )}
 
-                    {/* Notes */}
-                    {b.notes && (
-                      <p className="text-xs text-slate-400 italic mt-1 line-clamp-1">{b.notes}</p>
+                    {p.notes && (
+                      <p className="text-xs text-slate-400 italic mt-1 line-clamp-1">{p.notes}</p>
                     )}
-
-                    {/* Stats + groupes */}
-                    <div className="flex items-center gap-3 mt-2 flex-wrap">
-                      <span className="text-[10px] text-muted">
-                        {total} atelier{total > 1 ? "s" : ""}
-                        {absences > 0 && <span className="text-absences-dark"> · {absences} absence{absences > 1 ? "s" : ""}</span>}
-                      </span>
-                      {benGroups.map(g => (
-                        <span key={g.id} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                          {g.nom}
-                        </span>
-                      ))}
-                    </div>
                   </div>
 
                   {/* Edit button */}
                   <button
-                    onClick={() => openEdit(b)}
+                    onClick={() => openEdit(p)}
                     className="p-1.5 rounded-lg hover:bg-slate-100 text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-1"
                   >
                     <Pencil size={13} />
@@ -406,8 +404,8 @@ export default function BeneficiairesPage() {
       <SlideOver
         open={slideOpen}
         onClose={() => setSlideOpen(false)}
-        title={editing ? `${editing.prenom} ${editing.nom}` : "Nouveau bénéficiaire"}
-        subtitle="Fiche d'inscription"
+        title={editing ? `${editing.prenom} ${editing.nom}` : "Nouveau parent"}
+        subtitle="Fiche parent (adulte bénéficiaire)"
         width="lg"
       >
         <form onSubmit={e => { e.preventDefault(); handleSave() }} className="flex flex-col gap-5">
@@ -415,12 +413,12 @@ export default function BeneficiairesPage() {
           {/* Section Identité */}
           <div>
             <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <GraduationCap size={12} /> Identité
+              <Users size={12} /> Identité
             </p>
             <div className="flex flex-col gap-3">
               <FormRow>
                 <Field label="Prénom" required>
-                  <Input placeholder="Leila" value={form.prenom} onChange={e => setForm(f => ({ ...f, prenom: e.target.value }))} />
+                  <Input placeholder="Farida" value={form.prenom} onChange={e => setForm(f => ({ ...f, prenom: e.target.value }))} />
                 </Field>
                 <Field label="Nom" required>
                   <Input placeholder="A." value={form.nom} onChange={e => setForm(f => ({ ...f, nom: e.target.value }))} />
@@ -437,7 +435,7 @@ export default function BeneficiairesPage() {
                     const age = computeAge(form.dateNaissance)
                     if (age === null) return null
                     return (
-                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-ateliers-light text-ateliers-dark shrink-0">
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-communication-light text-communication-dark shrink-0">
                         → {age} an{age > 1 ? "s" : ""}
                       </span>
                     )
@@ -445,71 +443,47 @@ export default function BeneficiairesPage() {
                 </div>
               </Field>
               <FormRow>
-                <Field label="Email (optionnel si enfant)">
-                  <Input type="email" placeholder="leila@email.fr" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+                <Field label="Email">
+                  <Input type="email" placeholder="farida@email.fr" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
                 </Field>
-                <Field label="Téléphone (optionnel si enfant)">
+                <Field label="Téléphone">
                   <Input placeholder="06 12 34 56 78" value={form.telephone} onChange={e => setForm(f => ({ ...f, telephone: e.target.value }))} />
                 </Field>
               </FormRow>
             </div>
           </div>
 
-          {/* Section Contact parent (info admin — peut différer du compte AREA) */}
-          <div>
-            <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <Phone size={12} /> Contact parent / tuteur
-            </p>
-            <div className="flex flex-col gap-3">
-              <Field label="Nom du parent / tuteur" required>
-                <Input placeholder="Farida A." value={form.nomParent} onChange={e => setForm(f => ({ ...f, nomParent: e.target.value }))} />
-              </Field>
-              <FormRow>
-                <Field label="Téléphone" required>
-                  <Input placeholder="06 11 22 33 44" value={form.telephoneParent} onChange={e => setForm(f => ({ ...f, telephoneParent: e.target.value }))} />
-                </Field>
-                <Field label="Email">
-                  <Input type="email" placeholder="farida@email.fr" value={form.emailParent} onChange={e => setForm(f => ({ ...f, emailParent: e.target.value }))} />
-                </Field>
-              </FormRow>
-            </div>
-          </div>
-
-          {/* Section Parents rattachés (lien vers comptes Parent enregistrés dans AREA) */}
+          {/* Section Enfants rattachés (liens vers les fiches Eleve) */}
           <div>
             <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1 flex items-center gap-1.5">
-              <Users size={12} /> Parents rattachés (compte AREA)
+              <GraduationCap size={12} /> Enfants rattachés
             </p>
             <p className="text-[11px] text-muted mb-3">
-              Lien vers les parents enregistrés comme bénéficiaires AREA — utile pour
-              les ateliers adultes. Distinct du contact admin ci-dessus.
+              Sélectionne les élèves dont cette personne est le parent.
+              La modification est propagée automatiquement aux fiches Élève.
             </p>
-            {parentsDisponibles.length === 0 ? (
+            {elevesDisponibles.length === 0 ? (
               <p className="text-[11px] text-muted italic">
-                Aucun parent enregistré. Ajoute des parents dans l&apos;onglet Parents
-                pour pouvoir les lier ici.
+                Aucun élève enregistré. Ajoute des élèves dans l&apos;onglet Bénéficiaires.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {parentsDisponibles.map(p => {
-                  const sel = form.parentIds.includes(p.id)
+                {elevesDisponibles.map(e => {
+                  const sel = selectedEnfantIds.includes(e.id)
                   return (
                     <button
                       type="button"
-                      key={p.id}
-                      onClick={() => setForm(f => ({
-                        ...f,
-                        parentIds: sel
-                          ? f.parentIds.filter(id => id !== p.id)
-                          : [...f.parentIds, p.id],
-                      }))}
+                      key={e.id}
+                      onClick={() => setSelectedEnfantIds(prev =>
+                        sel ? prev.filter(id => id !== e.id) : [...prev, e.id],
+                      )}
                       className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
                         sel
                           ? "bg-ateliers text-white border-ateliers"
                           : "bg-surface text-muted border-border hover:border-ateliers"
                       }`}
                     >
-                      {p.prenom} {p.nom}
+                      {e.prenom} {e.nom}
                     </button>
                   )
                 })}
@@ -543,7 +517,7 @@ export default function BeneficiairesPage() {
             </div>
           </div>
 
-          {/* Section Test de positionnement (initial + final) */}
+          {/* Section Test de positionnement (mêmes 4 thématiques que pour les élèves) */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-muted uppercase tracking-wider">
@@ -556,7 +530,6 @@ export default function BeneficiairesPage() {
               )}
             </div>
 
-            {/* Test initial — clé pour la composition des groupes */}
             <div className="rounded-xl border border-border bg-surface/50 p-3 mb-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[11px] font-semibold text-foreground">
@@ -584,10 +557,9 @@ export default function BeneficiairesPage() {
               </div>
             </div>
 
-            {/* Test final — mesure d'impact (optionnel) */}
             <div className="rounded-xl border border-border bg-surface/50 p-3">
               <p className="text-[11px] font-semibold text-foreground mb-2">
-                Final <span className="text-muted font-normal">— mesure d'impact (optionnel)</span>
+                Final <span className="text-muted font-normal">— mesure d&apos;impact (optionnel)</span>
               </p>
               <div className="grid grid-cols-2 gap-2">
                 {THEMATIQUES.map(t => (
