@@ -24,7 +24,7 @@ import Link from "next/link"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Search,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -197,9 +197,61 @@ function AteliersTab({
   groupes: Groupe[]
   onEdit: (s: Session) => void
 }) {
-  const sorted   = [...sessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  // ── Filtres + recherche ──
+  const [search, setSearch]            = useState("")
+  const [filterFormatrice, setFilterFormatrice] = useState<string>("tous")
+  const [filterBenevole, setFilterBenevole]     = useState<string>("tous")
+  const [filterDate, setFilterDate]    = useState<"tous" | "semaine" | "mois" | "moisProchain">("tous")
+
+  // Options déduites des données : formatrices uniques + bénévoles uniques.
+  const formatricesUniques = Array.from(new Set(
+    sessions.map(s => s.formatrice).filter(f => f.trim().length > 0),
+  )).sort((a, b) => a.localeCompare(b))
+  const benevolesPresents = Array.from(new Set(
+    sessions.flatMap(s => s.benevoleIds),
+  ))
+    .map(id => benevoles.find(bv => bv.id === id))
+    .filter((bv): bv is (typeof benevoles)[0] => Boolean(bv))
+    .sort((a, b) => a.nom.localeCompare(b.nom))
+
+  // Plages de date pré-calculées (locales, ne se mettent pas à jour pendant
+  // que la page est ouverte — acceptable).
+  const now = new Date()
+  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay() + 1); startOfWeek.setHours(0, 0, 0, 0)
+  const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 6); endOfWeek.setHours(23, 59, 59, 999)
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const endOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999)
+
+  function matchDate(d: Date): boolean {
+    if (filterDate === "tous") return true
+    if (filterDate === "semaine") return d >= startOfWeek && d <= endOfWeek
+    if (filterDate === "mois") return d >= startOfMonth && d <= endOfMonth
+    if (filterDate === "moisProchain") return d >= startOfNextMonth && d <= endOfNextMonth
+    return true
+  }
+
+  const q = search.trim().toLowerCase()
+  const matches = (s: Session) => {
+    if (q && !s.titre.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q)) return false
+    if (filterFormatrice !== "tous" && s.formatrice !== filterFormatrice) return false
+    if (filterBenevole !== "tous" && !s.benevoleIds.includes(Number(filterBenevole))) return false
+    if (!matchDate(new Date(s.date))) return false
+    return true
+  }
+
+  const sorted   = [...sessions]
+    .filter(matches)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   const upcoming = sorted.filter(s => s.statut !== "terminé" && s.statut !== "annulé")
   const past     = sorted.filter(s => s.statut === "terminé" || s.statut === "annulé")
+
+  const filtreActif = q !== "" || filterFormatrice !== "tous" || filterBenevole !== "tous" || filterDate !== "tous"
+  function resetFiltres() {
+    setSearch(""); setFilterFormatrice("tous"); setFilterBenevole("tous"); setFilterDate("tous")
+  }
+
   // État "groupes dépliés" géré au niveau du parent pour ne pas se perdre
   // quand SessionCard (composant interne) est recréé à chaque render.
   const [groupesOuverts, setGroupesOuverts] = useState<Record<number, boolean>>({})
@@ -355,6 +407,69 @@ function AteliersTab({
 
   return (
     <div className="space-y-4">
+      {/* ── Filtres + recherche ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input
+            type="text"
+            placeholder="Rechercher un atelier (titre, description…)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              aria-label="Effacer la recherche"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <select
+          value={filterFormatrice}
+          onChange={e => setFilterFormatrice(e.target.value)}
+          className="text-sm rounded-xl border border-border bg-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+        >
+          <option value="tous">Toutes les formatrices</option>
+          {formatricesUniques.map(f => (
+            <option key={f} value={f}>{f}</option>
+          ))}
+        </select>
+        <select
+          value={filterBenevole}
+          onChange={e => setFilterBenevole(e.target.value)}
+          className="text-sm rounded-xl border border-border bg-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+        >
+          <option value="tous">Tous les bénévoles</option>
+          {benevolesPresents.map(bv => (
+            <option key={bv.id} value={String(bv.id)}>{bv.nom}</option>
+          ))}
+        </select>
+        <select
+          value={filterDate}
+          onChange={e => setFilterDate(e.target.value as typeof filterDate)}
+          className="text-sm rounded-xl border border-border bg-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+        >
+          <option value="tous">Toutes les dates</option>
+          <option value="semaine">Cette semaine</option>
+          <option value="mois">Ce mois-ci</option>
+          <option value="moisProchain">Mois prochain</option>
+        </select>
+        {filtreActif && (
+          <button
+            type="button"
+            onClick={resetFiltres}
+            className="text-xs text-muted hover:text-foreground hover:underline"
+          >
+            Réinitialiser
+          </button>
+        )}
+      </div>
+
       {upcoming.length > 0 && (
         <section className="bg-surface rounded-xl border border-border overflow-hidden">
           <div className="px-5 py-3 border-b border-border">
@@ -377,6 +492,11 @@ function AteliersTab({
       )}
       {sessions.length === 0 && (
         <p className="text-center text-sm text-muted py-12 italic">Aucun atelier planifié</p>
+      )}
+      {sessions.length > 0 && upcoming.length === 0 && past.length === 0 && (
+        <p className="text-center text-sm text-muted py-12 italic">
+          Aucun atelier ne correspond aux filtres actuels.
+        </p>
       )}
     </div>
   )
