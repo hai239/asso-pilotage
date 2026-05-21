@@ -516,6 +516,7 @@ function GroupesTab({
   // ── Filtres ──
   const [search, setSearch]               = useState("")
   const [filterAtelier, setFilterAtelier] = useState<string>("tous")
+  const [filterType, setFilterType]       = useState<TypeGroupe | "tous">("tous")
 
   // ── Tri ──
   type SortKey = "atelier" | "groupe" | "effectif"
@@ -553,6 +554,7 @@ function GroupesTab({
     } else if (filterAtelier !== "tous") {
       if (String(g.atelierId) !== filterAtelier) return false
     }
+    if (filterType !== "tous" && g.type !== filterType) return false
     if (!q) return true
     if (g.nom.toLowerCase().includes(q)) return true
     if (getAtelierTitre(g.atelierId).toLowerCase().includes(q)) return true
@@ -579,8 +581,12 @@ function GroupesTab({
   const benefsPlaces = new Set(groupes.flatMap(g => g.beneficiaireIds)).size
   const totalActifs  = beneficiaires.filter(b => b.statut === "actif").length
 
-  const filtreActif = q !== "" || filterAtelier !== "tous"
-  function resetFiltres() { setSearch(""); setFilterAtelier("tous") }
+  const filtreActif = q !== "" || filterAtelier !== "tous" || filterType !== "tous"
+  function resetFiltres() {
+    setSearch("")
+    setFilterAtelier("tous")
+    setFilterType("tous")
+  }
 
   // Sous-composant : en-tête de colonne triable
   function SortHeader({ keyName, label }: { keyName: SortKey; label: string }) {
@@ -646,6 +652,16 @@ function GroupesTab({
             <option key={s.id} value={String(s.id)}>{s.titre}</option>
           ))}
           {aGroupesManuels && <option value="sans">— Groupes manuels —</option>}
+        </select>
+        <select
+          value={filterType}
+          onChange={e => setFilterType(e.target.value as TypeGroupe | "tous")}
+          className="text-sm rounded-xl border border-border bg-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+        >
+          <option value="tous">Tous types</option>
+          <option value="niveau">Niveau (homogène)</option>
+          <option value="mixte">Mixte (hétérogène)</option>
+          <option value="âge">Âge</option>
         </select>
         {filtreActif && (
           <button type="button" onClick={resetFiltres} className="text-xs text-muted hover:text-foreground hover:underline">
@@ -1367,16 +1383,35 @@ export default function AteliersPage() {
               onChange={e => setGroupeForm(f => ({ ...f, nom: e.target.value }))}
             />
           </Field>
-          <Field label="Type">
-            <Select
-              value={groupeForm.type}
-              onChange={e => setGroupeForm(f => ({ ...f, type: e.target.value as TypeGroupe }))}
-            >
-              <option value="niveau">Niveau</option>
-              <option value="âge">Âge</option>
-              <option value="mixte">Mixte</option>
-            </Select>
-          </Field>
+          <FormRow>
+            <Field label="Type">
+              <Select
+                value={groupeForm.type}
+                onChange={e => setGroupeForm(f => ({ ...f, type: e.target.value as TypeGroupe }))}
+              >
+                <option value="niveau">Niveau</option>
+                <option value="âge">Âge</option>
+                <option value="mixte">Mixte</option>
+              </Select>
+            </Field>
+            <Field label="Atelier rattaché">
+              <Select
+                value={groupeForm.atelierId === null ? "" : String(groupeForm.atelierId)}
+                onChange={e => setGroupeForm(f => ({
+                  ...f,
+                  atelierId: e.target.value === "" ? null : Number(e.target.value),
+                }))}
+              >
+                <option value="">— Aucun (manuel) —</option>
+                {sessions
+                  .filter(s => s.statut !== "annulé")
+                  .sort((a, b) => a.titre.localeCompare(b.titre))
+                  .map(s => (
+                    <option key={s.id} value={String(s.id)}>{s.titre}</option>
+                  ))}
+              </Select>
+            </Field>
+          </FormRow>
           <Field label="Description">
             <Textarea
               placeholder="Critères de composition du groupe…"
