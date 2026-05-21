@@ -19,7 +19,7 @@ function load<T>(key: string, fallback: T): T {
 // ──────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────
-type ValidationStatus = "brouillon" | "en attente de validation" | "validé" | "publié"
+type ValidationStatus = "brouillon" | "à valider" | "validé" | "publié"
 type Plateforme       = "LinkedIn" | "Instagram" | "Facebook"
 type TypeEvenement    = "atelier" | "événement" | "cérémonie"
 type CategoriePost    = "atelier" | "autre"
@@ -101,7 +101,7 @@ interface BenefSlim {
 // Données initiales
 // ──────────────────────────────────────────────
 const postsInitiaux: Post[] = [
-  { id: 1, categorie: "atelier", date: "2026-05-21", titre: "Recap atelier HTML/CSS",       contenu: "Super séance aujourd'hui avec nos débutantes ! 💻 Elles ont créé leur première page web from scratch…",         plateforme: ["LinkedIn", "Instagram"], plateformeContenu: {}, statut: "en attente de validation", auteur: "Nadjat",  evenement: "Atelier 21 mai",          sessionId: null, participants: { apprenantes: [], benevoles: [], formatrices: [] } },
+  { id: 1, categorie: "atelier", date: "2026-05-21", titre: "Recap atelier HTML/CSS",       contenu: "Super séance aujourd'hui avec nos débutantes ! 💻 Elles ont créé leur première page web from scratch…",         plateforme: ["LinkedIn", "Instagram"], plateformeContenu: {}, statut: "à valider",                auteur: "Nadjat",  evenement: "Atelier 21 mai",          sessionId: null, participants: { apprenantes: [], benevoles: [], formatrices: [] } },
   { id: 2, categorie: "autre",   date: "2026-05-23", titre: "Portrait bénévole – Amira",    contenu: "Rencontre avec Amira, bénévole depuis 2 ans. Elle nous parle de ce qui l'a amenée à rejoindre l'association…",    plateforme: ["Instagram"],             plateformeContenu: {}, statut: "brouillon",                  auteur: "Nadjat",  evenement: null,                      sessionId: null },
   { id: 3, categorie: "autre",   date: "2026-05-27", titre: "Annonce portes ouvertes",       contenu: "📣 Portes ouvertes le 7 juin ! Venez découvrir nos ateliers, rencontrer l'équipe et vous inscrire pour la rentrée.", plateforme: ["LinkedIn", "Instagram", "Facebook"], plateformeContenu: {}, statut: "brouillon", auteur: "Nadjat", evenement: "Portes ouvertes 7 juin", sessionId: null },
   { id: 4, categorie: "autre",   date: "2026-06-07", titre: "Live portes ouvertes",          contenu: "🔴 On est EN DIRECT depuis nos portes ouvertes ! Rejoignez-nous pour voir ce qui se passe…",                      plateforme: ["Instagram"],             plateformeContenu: {}, statut: "validé",                     auteur: "Nadjat",  evenement: "Portes ouvertes 7 juin", sessionId: null },
@@ -111,7 +111,7 @@ const postsInitiaux: Post[] = [
 
 const KANBAN_COLS: { id: ValidationStatus; label: string; color: string }[] = [
   { id: "brouillon",                label: "Brouillon",  color: "bg-slate-100 border-slate-200" },
-  { id: "en attente de validation", label: "En attente", color: "bg-absences-light border-absences/30" },
+  { id: "à valider",                label: "À valider",  color: "bg-absences-light border-absences/30" },
   { id: "validé",                   label: "Validé",     color: "bg-indigo-50 border-indigo-200" },
   { id: "publié",                   label: "Publié",     color: "bg-emerald-50 border-emerald-200" },
 ]
@@ -131,7 +131,7 @@ const plateformeStyle: Record<Plateforme, string> = {
 // ──────────────────────────────────────────────
 // Calendrier éditorial
 // ──────────────────────────────────────────────
-function CalendrierTab({ posts, events, onNewPost }: { posts: Post[]; events: Evenement[]; onNewPost: (date: string) => void }) {
+function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: string) => void }) {
   const today = new Date("2026-05-20")
   const [displayYear, setDisplayYear] = useState(today.getFullYear())
   const [displayMonth, setDisplayMonth] = useState(today.getMonth())
@@ -175,17 +175,17 @@ function CalendrierTab({ posts, events, onNewPost }: { posts: Post[]; events: Ev
   }, [posts, year, month])
 
   const statutDot: Record<ValidationStatus, string> = {
-    brouillon:                  "bg-slate-300",
-    "en attente de validation": "bg-absences",
-    validé:                     "bg-indigo-600",
-    publié:                     "bg-emerald-500",
+    brouillon:     "bg-slate-300",
+    "à valider":   "bg-absences",
+    validé:        "bg-indigo-600",
+    publié:        "bg-emerald-500",
   }
 
   const statutBg: Record<ValidationStatus, string> = {
-    brouillon:                  "bg-slate-100 text-slate-600",
-    "en attente de validation": "bg-absences-light text-absences-dark",
-    validé:                     "bg-indigo-100 text-indigo-700",
-    publié:                     "bg-emerald-50 text-emerald-700",
+    brouillon:   "bg-slate-100 text-slate-600",
+    "à valider": "bg-absences-light text-absences-dark",
+    validé:      "bg-indigo-100 text-indigo-700",
+    publié:      "bg-emerald-50 text-emerald-700",
   }
 
   const cells: (number | null)[] = [...Array(offset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
@@ -226,10 +226,6 @@ function CalendrierTab({ posts, events, onNewPost }: { posts: Post[]; events: Ev
           const isToday = day === today.getDate() && year === today.getFullYear() && month === today.getMonth()
           const dayPosts = postsByDay[day] ?? []
           const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
-          const dayEvents = events.filter((e) => {
-            const d = new Date(e.date)
-            return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day
-          })
           return (
             <div
               key={i}
@@ -247,24 +243,10 @@ function CalendrierTab({ posts, events, onNewPost }: { posts: Post[]; events: Ev
                   <span className="truncate text-[10px] font-medium">{p.titre}</span>
                 </div>
               ))}
-              {dayEvents.map((e) => (
-                <div key={e.id} className="text-[10px] text-absences-dark bg-absences-light px-1 py-0.5 rounded truncate mt-0.5">
-                  📅 {e.nom}
-                </div>
-              ))}
             </div>
           )
         })}
       </div>
-      {events.length > 0 && (
-        <div className="flex gap-3 flex-wrap text-xs text-muted pt-2">
-          {events.map((e) => (
-            <span key={e.id} className="flex items-center gap-1.5 bg-absences-light text-absences-dark px-2 py-1 rounded-full">
-              📅 {e.nom} · {new Date(e.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -326,7 +308,7 @@ function KanbanTab({ posts, onChangeStatus, onEdit }: {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
-        Circuit de validation : <span className="font-medium text-foreground">Brouillon → En attente de validation → Validé → Publié</span>.
+        Circuit de validation : <span className="font-medium text-foreground">Brouillon → À valider → Validé → Publié</span>.
         Cliquez sur une carte pour l'éditer.
       </p>
       <div className="grid grid-cols-4 gap-4">
@@ -344,13 +326,12 @@ function KanbanTab({ posts, onChangeStatus, onEdit }: {
                   onClick={() => onEdit(p)}
                   className="bg-white rounded-xl p-3 shadow-sm border border-white flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-slate-200 transition-all group"
                 >
-                  <p className="text-xs font-semibold text-foreground leading-snug group-hover:text-ateliers-dark transition-colors">{p.titre}</p>
-                  {p.contenu && <p className="text-[11px] text-muted leading-relaxed line-clamp-2">{p.contenu}</p>}
-                  {p.categorie === "atelier" && p.participants && p.participants.apprenantes.length > 0 && (
-                    <p className="text-[10px] text-ateliers-dark flex items-center gap-1">
-                      <Users size={9} /> {p.participants.apprenantes.length} apprenante{p.participants.apprenantes.length > 1 ? "s" : ""}
-                    </p>
-                  )}
+                  <div className="flex items-start justify-between gap-1">
+                    <p className="text-xs font-semibold text-foreground leading-snug group-hover:text-ateliers-dark transition-colors">{p.titre}</p>
+                    <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${p.categorie === "atelier" ? "bg-ateliers-light text-ateliers-dark" : "bg-slate-100 text-slate-600"}`}>
+                      {p.categorie === "atelier" ? "Atelier" : "Autre"}
+                    </span>
+                  </div>
                   <div className="flex flex-wrap gap-1">
                     {p.plateforme.map((pl) => (
                       <span key={pl} className={`flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${plateformeStyle[pl]}`}>
@@ -363,15 +344,15 @@ function KanbanTab({ posts, onChangeStatus, onEdit }: {
                   </div>
                   <div className="flex gap-1.5 mt-1" onClick={(e) => e.stopPropagation()}>
                     {p.statut === "brouillon" && (
-                      <button onClick={() => onChangeStatus(p.id, "en attente de validation")} className="flex-1 text-[10px] bg-ateliers-light text-ateliers-dark rounded-lg py-1 font-medium hover:opacity-80">Soumettre</button>
+                      <button onClick={() => onChangeStatus(p.id, "à valider")} className="flex-1 text-[10px] bg-ateliers-light text-ateliers-dark rounded-lg py-1 font-medium hover:opacity-80">Soumettre</button>
                     )}
-                    {p.statut === "en attente de validation" && <>
+                    {p.statut === "à valider" && <>
                       <button onClick={() => onChangeStatus(p.id, "validé")} className="flex-1 text-[10px] bg-finances-light text-finances-dark rounded-lg py-1 font-medium hover:opacity-80 flex items-center justify-center gap-1"><Check size={10} /> Valider</button>
                       <button onClick={() => onChangeStatus(p.id, "brouillon")} className="text-[10px] bg-red-50 text-alert rounded-lg px-2 py-1 font-medium hover:opacity-80"><X size={10} /></button>
                     </>}
                     {p.statut === "validé" && <>
                       <button onClick={() => onChangeStatus(p.id, "publié")} className="flex-1 text-[10px] bg-emerald-100 text-emerald-700 rounded-lg py-1 font-medium hover:opacity-80">Marquer publié</button>
-                      <button onClick={() => onChangeStatus(p.id, "en attente de validation")} className="text-[10px] bg-slate-100 text-muted rounded-lg px-2 py-1 hover:opacity-80"><RotateCcw size={10} /></button>
+                      <button onClick={() => onChangeStatus(p.id, "à valider")} className="text-[10px] bg-slate-100 text-muted rounded-lg px-2 py-1 hover:opacity-80"><RotateCcw size={10} /></button>
                     </>}
                     {p.statut === "publié" && (
                       <span className="flex-1 text-[10px] text-center text-emerald-600 font-medium py-1">✓ Publié</span>
@@ -790,7 +771,7 @@ export default function CommunicationPage() {
   const currentYear    = new Date().getFullYear()
   const debutAnnee     = new Date(currentYear, 0, 1)
   const nbBrouillons   = posts.filter((p) => p.statut === "brouillon").length
-  const valides        = posts.filter((p) => p.statut === "validé").length
+  const aValider       = posts.filter((p) => p.statut === "à valider").length
   const nbPubliesAnnee = posts.filter((p) => p.statut === "publié" && new Date(p.date) >= debutAnnee).length
 
   const availableBeneficiaires = beneficiaires.filter(b => !form.participants?.apprenantes.some(a => a.id === b.id))
@@ -822,7 +803,7 @@ export default function CommunicationPage() {
             <Field label="État">
               <Select value={form.statut} onChange={e => setForm(f => ({ ...f, statut: e.target.value as ValidationStatus }))}>
                 <option value="brouillon">Brouillon</option>
-                <option value="en attente de validation">En attente de validation</option>
+                <option value="à valider">À valider</option>
                 <option value="validé">Validé</option>
                 <option value="publié">Publié</option>
               </Select>
@@ -1089,9 +1070,9 @@ export default function CommunicationPage() {
           <p className="text-3xl font-bold text-slate-700">{nbBrouillons}</p>
           <p className="text-sm text-slate-500 mt-1">En cours de rédaction</p>
         </div>
-        <div className="bg-finances-light rounded-xl border border-finances/20 p-4">
-          <p className="text-3xl font-bold text-finances-dark">{valides}</p>
-          <p className="text-sm text-finances-dark/70 mt-1">Validés à publier</p>
+        <div className="bg-absences-light rounded-xl border border-absences/20 p-4">
+          <p className="text-3xl font-bold text-absences-dark">{aValider}</p>
+          <p className="text-sm text-absences-dark/70 mt-1">À valider</p>
         </div>
         <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
           <p className="text-3xl font-bold text-emerald-700">{nbPubliesAnnee}</p>
@@ -1118,7 +1099,7 @@ export default function CommunicationPage() {
         ))}
       </div>
 
-      {tab === "calendrier"   && <CalendrierTab posts={posts} events={events} onNewPost={openNewWithDate} />}
+      {tab === "calendrier"   && <CalendrierTab posts={posts} onNewPost={openNewWithDate} />}
       {tab === "kanban"       && <KanbanTab posts={posts} onChangeStatus={changeStatus} onEdit={openEdit} />}
       {tab === "evenements"   && <EventsTab events={events} onEdit={openEditEvent} onNew={openNewEvent} />}
       {tab === "integrations" && <IntegrationsTab config={integrations} onChange={persistIntegrations} onTest={testWebhook} testStatus={webhookTestStatus} />}
