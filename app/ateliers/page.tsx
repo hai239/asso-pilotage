@@ -1,16 +1,24 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ateliers as ateliersMock, benevoles as benevolesMock } from "@/lib/mock-data"
+import { ateliers as ateliersMock, benevoles as benevolesMock, membres as membresMock } from "@/lib/mock-data"
 import {
+  THEMATIQUES,
   moyenne as notesMoyenne,
   migrate as migrateBenef,
   type NotesPositionnement,
+  type Thematique,
 } from "@/lib/positionnement"
+import {
+  emptyFiche,
+  migrateFiche,
+  encadrantsRequis,
+  type FicheAtelier,
+} from "@/lib/atelier"
 import Link from "next/link"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
-  X, Columns3,
+  X, Columns3, Check, AlertTriangle,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -24,7 +32,7 @@ type NiveauBenef   = "débutant" | "intermédiaire" | "avancé"
 type StatutBenef   = "actif" | "diplômé" | "abandon"
 type TypeGroupe    = "niveau" | "âge" | "mixte"
 
-interface Session {
+interface Session extends FicheAtelier {
   id: number
   titre: string
   description: string
@@ -108,12 +116,57 @@ function initials(prenom: string, nom: string): string {
 }
 
 // ──────────────────────────────────────────────
+// Sous-composant — liste éditable (tâches, besoins, étapes)
+// ──────────────────────────────────────────────
+function EditableList(props: {
+  items: string[]
+  onChange: (items: string[]) => void
+  placeholder: string
+  ordered?: boolean
+}) {
+  const { items, onChange, placeholder, ordered } = props
+  return (
+    <div className="flex flex-col gap-1.5">
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="text-[10px] text-muted w-4 shrink-0 text-right">
+            {ordered ? `${i + 1}.` : "•"}
+          </span>
+          <input
+            type="text"
+            value={item}
+            onChange={e => onChange(items.map((x, j) => (j === i ? e.target.value : x)))}
+            className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(items.filter((_, j) => j !== i))}
+            className="p-1 rounded text-muted hover:text-foreground hover:bg-slate-100"
+            aria-label="Supprimer cette entrée"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...items, ""])}
+        className="self-start flex items-center gap-1 text-xs text-ateliers-dark hover:underline mt-1"
+      >
+        <Plus size={11} /> {placeholder}
+      </button>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────
 // Empty factories
 // ──────────────────────────────────────────────
 const emptySession = (): Omit<Session, "id"> => ({
   titre: "", description: "", date: new Date().toISOString().split("T")[0],
   heure: "14h00", duree: "2h", salle: "", formatrice: "",
   beneficiaireIds: [], benevoleIds: [], statut: "planifié",
+  ...emptyFiche(),
 })
 
 const emptyGroupe = (): Omit<Groupe, "id"> => ({
@@ -158,6 +211,24 @@ function AteliersTab({
             <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statutSessionStyle[s.statut]}`}>{s.statut}</span>
           </div>
           {s.description && <p className="text-xs text-muted mt-0.5 truncate">{s.description}</p>}
+          {/* Compétences ciblées (Lot 2) */}
+          {s.competencesCiblees.length > 0 && (
+            <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+              {s.competencesCiblees.map(c => {
+                const t = THEMATIQUES.find(x => x.key === c)
+                return t ? (
+                  <span key={c} className="text-[10px] bg-ateliers/10 text-ateliers-dark px-1.5 py-0.5 rounded font-medium">
+                    {t.short}
+                  </span>
+                ) : null
+              })}
+              {(s.ageMin !== null || s.ageMax !== null) && (
+                <span className="text-[10px] text-muted ml-1">
+                  · {s.ageMin ?? "?"}-{s.ageMax ?? "?"} ans
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3 mt-1.5 flex-wrap text-xs text-muted">
             <span>⏱ {s.duree}</span>
             {s.salle     && <span>📍 {s.salle}</span>}
@@ -406,8 +477,10 @@ export default function AteliersPage() {
 
   // Hydration from localStorage
   useEffect(() => {
-    setSessions(load(S_SESSIONS, ateliersMock.sessions as Session[]))
-    // Migration auto si la donnée vient de l'ancien format (note unique).
+    // Migration auto pour les sessions (champs FicheAtelier ajoutés au Lot 2).
+    const sessionsRaw = load<Session[]>(S_SESSIONS, ateliersMock.sessions as Session[])
+    setSessions(sessionsRaw.map(s => migrateFiche(s) as Session))
+    // Migration auto pour les bénéficiaires (note unique → 4 notes du Lot 1).
     const benefsRaw = load<Beneficiaire[]>(S_BENEF, ateliersMock.beneficiaires as Beneficiaire[])
     setBeneficiaires(benefsRaw.map(b => migrateBenef(b) as Beneficiaire))
     setGroupes(load(S_GROUPES, ateliersMock.groupes as Groupe[]))
@@ -451,6 +524,22 @@ export default function AteliersPage() {
       benevoleIds: f.benevoleIds.includes(id)
         ? f.benevoleIds.filter(x => x !== id)
         : [...f.benevoleIds, id],
+    }))
+  }
+  function toggleCompetence(t: Thematique) {
+    setSessionForm(f => ({
+      ...f,
+      competencesCiblees: f.competencesCiblees.includes(t)
+        ? f.competencesCiblees.filter(x => x !== t)
+        : [...f.competencesCiblees, t],
+    }))
+  }
+  function togglePersonne(id: number) {
+    setSessionForm(f => ({
+      ...f,
+      personnesImpliqueesIds: f.personnesImpliqueesIds.includes(id)
+        ? f.personnesImpliqueesIds.filter(x => x !== id)
+        : [...f.personnesImpliqueesIds, id],
     }))
   }
   function importGroupeIntoSession(groupeId: number) {
@@ -604,6 +693,111 @@ export default function AteliersPage() {
               onChange={e => setSessionForm(f => ({ ...f, description: e.target.value }))}
             />
           </Field>
+
+          {/* ── Compétences ciblées ── */}
+          <div className="rounded-xl border border-ateliers/30 bg-ateliers-light/40 p-3">
+            <p className="text-xs font-semibold text-ateliers-dark uppercase tracking-wider mb-2">
+              Compétences ciblées
+            </p>
+            <p className="text-[11px] text-muted mb-3">
+              Cochez les thématiques du test de positionnement qui seront travaillées.
+              Elles servent à proposer une composition de groupes adaptée.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {THEMATIQUES.map(t => {
+                const checked = sessionForm.competencesCiblees.includes(t.key)
+                return (
+                  <button
+                    type="button"
+                    key={t.key}
+                    onClick={() => toggleCompetence(t.key)}
+                    className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg border font-medium transition-colors ${
+                      checked
+                        ? "bg-ateliers text-white border-ateliers"
+                        : "bg-surface text-muted border-border hover:border-ateliers"
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                      checked ? "bg-white/20 border-white/40" : "bg-surface border-border"
+                    }`}>
+                      {checked && <Check size={10} />}
+                    </span>
+                    {t.label}
+                  </button>
+                )
+              })}
+            </div>
+            {sessionForm.competencesCiblees.length === 0 && (
+              <p className="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
+                <AlertTriangle size={11} /> Aucune compétence cochée — l'auto-composition de groupes sera désactivée pour cet atelier.
+              </p>
+            )}
+          </div>
+
+          {/* ── Public ciblé ── */}
+          <div className="rounded-xl border border-border bg-surface/50 p-3">
+            <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">
+              Public ciblé
+            </p>
+            <FormRow>
+              <Field label="Âge min">
+                <Input
+                  type="number" min={6} max={18} placeholder="6"
+                  value={sessionForm.ageMin ?? ""}
+                  onChange={e => setSessionForm(f => ({
+                    ...f, ageMin: e.target.value === "" ? null : Number(e.target.value),
+                  }))}
+                />
+              </Field>
+              <Field label="Âge max">
+                <Input
+                  type="number" min={6} max={18} placeholder="18"
+                  value={sessionForm.ageMax ?? ""}
+                  onChange={e => setSessionForm(f => ({
+                    ...f, ageMax: e.target.value === "" ? null : Number(e.target.value),
+                  }))}
+                />
+              </Field>
+            </FormRow>
+            <FormRow>
+              <Field label="Taille de groupe cible">
+                <Input
+                  type="number" min={2} max={30} placeholder="10"
+                  value={sessionForm.tailleGroupeCible ?? ""}
+                  onChange={e => setSessionForm(f => ({
+                    ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
+                  }))}
+                />
+              </Field>
+              <Field label="Ratio encadrement (1 pour N)">
+                <Input
+                  type="number" min={1} max={20} placeholder="(optionnel)"
+                  value={sessionForm.ratioEncadrement ?? ""}
+                  onChange={e => setSessionForm(f => ({
+                    ...f, ratioEncadrement: e.target.value === "" ? null : Number(e.target.value),
+                  }))}
+                />
+              </Field>
+            </FormRow>
+            {sessionForm.ratioEncadrement !== null && sessionForm.tailleGroupeCible !== null && (
+              <p className="text-[11px] text-muted mt-1">
+                → {encadrantsRequis(sessionForm.ratioEncadrement, sessionForm.tailleGroupeCible)} encadrant·es
+                requis par groupe de {sessionForm.tailleGroupeCible}.
+              </p>
+            )}
+            <label className="flex items-center gap-2 mt-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sessionForm.mixerNiveaux}
+                onChange={e => setSessionForm(f => ({ ...f, mixerNiveaux: e.target.checked }))}
+                className="rounded border-border"
+              />
+              <span className="text-xs text-foreground">
+                Mélanger les niveaux <span className="text-muted">(par défaut : groupes homogènes)</span>
+              </span>
+            </label>
+          </div>
+
           <FormRow>
             <Field label="Date">
               <Input
@@ -656,6 +850,59 @@ export default function AteliersPage() {
               </Select>
             </Field>
           </FormRow>
+
+          {/* ── Organisation ── */}
+          <div className="rounded-xl border border-border bg-surface/50 p-3">
+            <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">
+              Organisation
+            </p>
+            <div className="flex flex-col gap-4">
+              <Field label="Tâches à faire">
+                <EditableList
+                  items={sessionForm.taches}
+                  onChange={taches => setSessionForm(f => ({ ...f, taches }))}
+                  placeholder="Ajouter une tâche"
+                />
+              </Field>
+              <Field label="Besoins matériels / humains">
+                <EditableList
+                  items={sessionForm.besoins}
+                  onChange={besoins => setSessionForm(f => ({ ...f, besoins }))}
+                  placeholder="Ajouter un besoin"
+                />
+              </Field>
+              <Field label="Étapes d'organisation">
+                <EditableList
+                  items={sessionForm.etapes}
+                  onChange={etapes => setSessionForm(f => ({ ...f, etapes }))}
+                  placeholder="Ajouter une étape"
+                  ordered
+                />
+              </Field>
+              <Field label="Personnes impliquées">
+                <div className="flex flex-wrap gap-2">
+                  {membresMock.liste.map(m => {
+                    const sel = sessionForm.personnesImpliqueesIds.includes(m.id)
+                    return (
+                      <button
+                        type="button"
+                        key={m.id}
+                        onClick={() => togglePersonne(m.id)}
+                        className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                          sel
+                            ? "bg-communication text-white border-communication"
+                            : "bg-surface text-muted border-border hover:border-communication"
+                        }`}
+                      >
+                        {m.prenom} {m.nom}
+                        <span className="ml-1 opacity-60">· {m.role}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </Field>
+            </div>
+          </div>
 
           {/* Bénévoles — multi-select */}
           <Field label="Bénévoles">

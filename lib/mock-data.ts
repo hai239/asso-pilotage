@@ -31,12 +31,47 @@ export const finances = {
 }
 
 export const ateliers = {
-  // Sessions d'ateliers
+  // Sessions d'ateliers — depuis le Lot 2 chaque atelier porte une fiche descriptive
+  // étendue (compétences ciblées, public, organisation). Cf. lib/atelier.ts.
   sessions: [
-    { id: 1, titre: "Initiation HTML/CSS", description: "Découverte des bases du web", date: "2026-05-21", heure: "14h00", duree: "2h", salle: "Salle A", formatrice: "Somayeh", beneficiaireIds: [1, 3, 4], benevoleIds: [1], statut: "planifié" },
-    { id: 2, titre: "Logique & Algorithmie", description: "Résolution de problèmes et pensée computationnelle", date: "2026-05-22", heure: "10h00", duree: "2h", salle: "À confirmer", formatrice: "Somayeh", beneficiaireIds: [2, 6], benevoleIds: [2], statut: "planifié" },
-    { id: 3, titre: "Projet web libre", description: "Travaux pratiques sur projet personnel", date: "2026-05-24", heure: "09h30", duree: "3h", salle: "Salle B", formatrice: "Nadia", beneficiaireIds: [5], benevoleIds: [3], statut: "planifié" },
-    { id: 4, titre: "Initiation HTML/CSS — séance 1", description: "", date: "2026-05-07", heure: "14h00", duree: "2h", salle: "Salle A", formatrice: "Somayeh", beneficiaireIds: [1, 3, 4], benevoleIds: [1], statut: "terminé" },
+    {
+      id: 1, titre: "Atelier théâtre — expression orale", description: "Travail de l'élocution et de la prise de parole en public à travers le jeu théâtral.",
+      date: "2026-05-21", heure: "14h00", duree: "2h", salle: "Salle A", formatrice: "Somayeh",
+      beneficiaireIds: [1, 3, 4], benevoleIds: [1], statut: "planifié",
+      competencesCiblees: ["expressionOrale", "comprehensionOrale"],
+      ageMin: 6, ageMax: 9, tailleGroupeCible: 8, ratioEncadrement: null, mixerNiveaux: false,
+      taches: ["Préparer 3 saynètes courtes", "Imprimer les scripts", "Aménager la salle (chaises en U)"],
+      besoins: ["Salle avec espace dégagé", "Accessoires (chapeaux, foulards)", "1 formatrice + 1 bénévole"],
+      etapes: ["Présentation des participants (10 min)", "Échauffement vocal (20 min)", "Lecture des scripts (30 min)", "Jeu et restitution (50 min)", "Débrief collectif (10 min)"],
+      personnesImpliqueesIds: [2, 4],
+    },
+    {
+      id: 2, titre: "Logique & Algorithmie", description: "Résolution de problèmes et pensée computationnelle.",
+      date: "2026-05-22", heure: "10h00", duree: "2h", salle: "À confirmer", formatrice: "Somayeh",
+      beneficiaireIds: [2, 6], benevoleIds: [2], statut: "planifié",
+      competencesCiblees: ["comprehensionEcrite", "expressionEcrite"],
+      ageMin: 10, ageMax: 13, tailleGroupeCible: 10, ratioEncadrement: null, mixerNiveaux: false,
+      taches: [], besoins: [], etapes: [], personnesImpliqueesIds: [],
+    },
+    {
+      id: 3, titre: "Atelier exposé", description: "Préparation et présentation d'un exposé court, en binôme avec accompagnement renforcé.",
+      date: "2026-05-24", heure: "09h30", duree: "3h", salle: "Salle B", formatrice: "Nadia",
+      beneficiaireIds: [5], benevoleIds: [3], statut: "planifié",
+      competencesCiblees: ["expressionOrale", "expressionEcrite"],
+      ageMin: 14, ageMax: 18, tailleGroupeCible: 8, ratioEncadrement: 2, mixerNiveaux: false,
+      taches: ["Constituer les binômes", "Choisir les sujets", "Recruter 4 bénévoles accompagnants"],
+      besoins: ["1 bénévole pour 2 bénéficiaires", "Salle avec tableau", "Ordinateurs (1 par binôme)"],
+      etapes: ["Choix du sujet (30 min)", "Recherche documentaire (45 min)", "Rédaction du plan (45 min)", "Répétitions en binôme (45 min)", "Présentation au groupe (15 min)"],
+      personnesImpliqueesIds: [3, 4, 5],
+    },
+    {
+      id: 4, titre: "Initiation HTML/CSS — séance 1", description: "Découverte des bases du web.",
+      date: "2026-05-07", heure: "14h00", duree: "2h", salle: "Salle A", formatrice: "Somayeh",
+      beneficiaireIds: [1, 3, 4], benevoleIds: [1], statut: "terminé",
+      competencesCiblees: ["comprehensionEcrite"],
+      ageMin: 6, ageMax: 9, tailleGroupeCible: 8, ratioEncadrement: null, mixerNiveaux: false,
+      taches: [], besoins: [], etapes: [], personnesImpliqueesIds: [],
+    },
   ],
   // Bénéficiaires (enfants + contact parent)
   // Notes du test de positionnement : 4 thématiques × 2 sessions (initial / final).
