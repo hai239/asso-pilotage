@@ -46,6 +46,11 @@
   --color-benevoles-dark: #1a9494;
 
   --color-alert: #ef4444;
+
+  /* Familles → violet */
+  --color-familles: #7c3aed;
+  --color-familles-light: #ede9fe;
+  --color-familles-dark: #5b21b6;
 }
 
 @theme inline {
@@ -80,6 +85,10 @@
   --color-benevoles: var(--color-benevoles);
   --color-benevoles-light: var(--color-benevoles-light);
   --color-benevoles-dark: var(--color-benevoles-dark);
+
+  --color-familles: var(--color-familles);
+  --color-familles-light: var(--color-familles-light);
+  --color-familles-dark: var(--color-familles-dark);
 
   --color-alert: var(--color-alert);
 

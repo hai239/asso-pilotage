@@ -6,8 +6,8 @@
 ## Ce qu'est ce projet
 
 Dashboard de pilotage pour une association de formation numérique (Ada Tech School).
-**SaaS Next.js** — interface uniquement, pas de backend pour l'instant.
-Persistance : `localStorage` (voir ADR 001). Données mockées dans `lib/`.
+**SaaS Next.js** — interface uniquement.
+Persistance actuelle : `localStorage`. Migration en cours vers **Google Sheets** (voir section "Chantier en cours").
 
 ## Stack exacte
 
@@ -33,6 +33,10 @@ app/
 ├── communication/  Calendrier éditorial + kanban suivi posts + archive publiés
 ├── benevoles/      Disponibilités bénévoles + gestion événements
 ├── membres/        Annuaire membres (rôles, statuts, CRUD)
+├── familles/       Bénéficiaires — familles, parents, enfants ✅ NOUVEAU
+│   ├── page.tsx              Listing 3 onglets (Familles / Parents / Enfants)
+│   ├── [id]/page.tsx         Fiche famille + ajout membre
+│   └── [id]/membre/[membreId]/page.tsx  Fiche membre individuelle
 └── roadmap/        Matrice impact/facilité + suivi sous-actions
 
 components/
@@ -42,11 +46,12 @@ components/
 └── AuthGate.tsx    Protection des routes + affichage conditionnel sidebar
 
 lib/
-├── auth.ts         Helpers auth (login, register, logout, getSession)
-├── auth-context.tsx Provider React + hook useAuth()
-├── mock-data.ts    Données mockées (absences, finances, ateliers, com, bénévoles)
-├── emargement-data.ts Séances + présences initiales
-└── roadmap-data.ts  6 thèmes, 16 use cases, 43 sous-actions
+├── auth.ts             Helpers auth (login, register, logout, getSession)
+├── auth-context.tsx    Provider React + hook useAuth()
+├── mock-data.ts        Données mockées (absences, finances, ateliers, com, bénévoles)
+├── emargement-data.ts  Séances + présences initiales
+├── roadmap-data.ts     6 thèmes, 16 use cases, 43 sous-actions
+└── familles-data.ts    Types + mock data + clés localStorage + getStatut() ✅ NOUVEAU
 
 app/api/
 └── generate-post/route.ts  POST — génère contenu + hashtags via Claude (Anthropic SDK)
@@ -108,7 +113,7 @@ const { user, logout } = useAuth()
 ### "use client" — règle
 Toutes les pages sont `"use client"` (localStorage, état, hooks).
 Les composants partagés aussi (`Sidebar`, `SlideOver`, `AuthGate`).
-Pas de Server Actions, pas d'API routes dans ce projet (voir ADR 001).
+Pas de Server Actions. Les appels API se feront via **Google Apps Script Web App** (voir Chantier en cours).
 
 ## Modèle Post (Communication)
 
@@ -448,3 +453,66 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
 Overall average: **60-90% token reduction** on common development operations.
 <!-- /rtk-instructions -->
+
+---
+
+## Module Familles — ce qui a été construit
+
+### Page listing (`/familles`)
+- 3 onglets : **Familles** (kanban), **Parents** (liste), **Enfants** (liste)
+- Tri alphabétique, barre de recherche, en-têtes de colonnes alignées
+- Colonnes : Membre / Groupe / Inscription / Assiduité / Statut
+- Badge **Statut** calculé depuis l'assiduité : ≥75% Actif, 50-74% À surveiller, <50% Abandon
+- Bouton **"+ Ajouter une famille"** (onglet Familles uniquement)
+
+### Fiche famille (`/familles/[id]`)
+- Infos famille + bouton Modifier (avec cascade adresse → tous les membres)
+- Cartes membres avec assiduité + statut
+- Bouton **"+ Ajouter un membre"** (Parent ou Enfant)
+
+### Fiche membre (`/familles/[id]/membre/[membreId]`)
+- Breadcrumb, badges type/groupe/statut
+- Infos : téléphone, email, WhatsApp, adresse, inscriptions, autorisation, **date de naissance**, **âge**
+- Bloc résultats : Test 1/20, Test 2/20, Assiduité%
+- **Date de naissance → calcule l'âge automatiquement** dans le formulaire
+
+### Données (`lib/familles-data.ts`)
+- Clés localStorage : `asso-familles`, `asso-beneficiaires-parents-v2`, `asso-beneficiaires-enfants-v2`
+- 5 familles, 6 parents, 7 enfants avec tous les champs (dont âge + date de naissance)
+- Fonction `getStatut(assiduite: number): "Actif" | "À surveiller" | "Abandon"`
+- Couleur du module : `familles` / `familles-light` / `familles-dark` (violet)
+
+---
+
+## Chantier en cours — Migration Google Sheets
+
+### Décision
+Connecter le site directement à **Google Sheets** via **Google Apps Script** (Web App) pour remplacer le localStorage.
+
+### Architecture cible
+```
+Google Sheet (données) → Apps Script Web App (API) → Next.js (fetch)
+```
+
+### Nouveau Google Sheet
+- URL : `https://docs.google.com/spreadsheets/d/1vvI6bzj3N0hjBWzRi9p7Yt_l9yzH2XAxDnDBDwTZtCs`
+- 2 feuilles : **Famille** et **Contact**
+
+### Structure connue — feuille "Famille"
+| Colonne | Exemple |
+|---|---|
+| ID Famille | FAM001 |
+| Nom | Dupont |
+| Adresse | 1 rue de la prairie |
+| Quartier QVP | Oui |
+| Contact principal, ID Contact | CONT001 |
+| Membres de la famille - ID contact | CONT001, CONT002 |
+
+### ❓ À faire pour reprendre ce chantier
+1. Récupérer les **colonnes de l'onglet "Contact"** (pas encore obtenues)
+2. Confirmer : parents et enfants dans la même table Contact ? Quelle colonne distingue les deux ?
+3. Confirmer le lien famille ↔ contact via les IDs
+4. Créer le script Apps Script (doGet / doPost) sur le nouveau Sheet
+5. Adapter `lib/familles-data.ts` aux nouveaux types
+6. Remplacer les appels localStorage par des `fetch()` vers l'Apps Script
+7. Tester le CRUD complet (créer, modifier, supprimer)
