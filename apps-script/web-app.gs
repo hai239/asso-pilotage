@@ -1,5 +1,5 @@
 // Web App — CRM relationnel BDD_Asso_CRM (lecture + ecriture)
-// Tables : FAMILLE / PERSONNE / INSCRIPTION / PAIEMENT / EVALUATION / SCOLARITE / ETABLISSEMENT / PROFESSEUR
+// Tables : FAMILLE / PERSONNE / INSCRIPTION / PAIEMENT / EVALUATION / SCOLARITE / ETABLISSEMENT / PROFESSEUR / EVENEMENT / ASSIDUITE
 // L'etat civil vit dans PERSONNE ; le niveau/statut vit dans INSCRIPTION.
 
 const SHEET_ID = "1bOISBPwoU1xa5R4Um0fRASXKFeclJ8jB3A3CUHBMlI8";
@@ -9,13 +9,15 @@ function doGet(e) {
   try {
     var ss = SpreadsheetApp.openById(SHEET_ID);
     var result;
-    if (action === "ping") result = { ok: true, message: "API CRM operationnelle", base: ss.getName() };
-    else if (action === "inspect") result = inspecterNouveauSheet();
-    else if (action === "getFamilles") result = getFamilles(ss);
-    else if (action === "getMembres") result = getMembres(ss, e.parameter.idFamille);
-    else if (action === "getMembre") result = getMembre(ss, e.parameter.idMembre);
-    else if (action === "getPaiements") result = getPaiements(ss, e.parameter.idMembre);
-    else if (action === "getTaches") result = getTaches(ss, e.parameter.cibleType, e.parameter.cibleId);
+    if (action === "ping")           result = { ok: true, message: "API CRM operationnelle", base: ss.getName() };
+    else if (action === "inspectSheets") result = inspectSheets(ss);
+    else if (action === "getFamilles")   result = getFamilles(ss);
+    else if (action === "getMembres")    result = getMembres(ss, e.parameter.idFamille);
+    else if (action === "getMembre")     result = getMembre(ss, e.parameter.idMembre);
+    else if (action === "getPaiements")  result = getPaiements(ss, e.parameter.idMembre);
+    else if (action === "getTaches")     result = getTaches(ss, e.parameter.cibleType, e.parameter.cibleId);
+    else if (action === "getEvenements") result = getEvenements(ss, e.parameter.categorie);
+    else if (action === "getAssiduite")  result = getAssiduite(ss, e.parameter.idEvenement, e.parameter.idPersonne);
     else result = { error: "Action inconnue : " + action };
     return jsonResponse(result);
   } catch (err) {
@@ -28,16 +30,25 @@ function doPost(e) {
     var body = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.openById(SHEET_ID);
     var a = body.action, result;
-    if (a === "addFamille") result = addFamille(ss, body.data);
-    else if (a === "updateFamille") result = updateFamille(ss, body.idFamille, body.data);
-    else if (a === "addMembre") result = addMembre(ss, body.data);
-    else if (a === "updateMembre") result = updateMembre(ss, body.idMembre, body.data);
-    else if (a === "deleteMembre") result = deleteMembre(ss, body.idMembre);
+    if (a === "addFamille")              result = addFamille(ss, body.data);
+    else if (a === "updateFamille")      result = updateFamille(ss, body.idFamille, body.data);
+    else if (a === "addMembre")          result = addMembre(ss, body.data);
+    else if (a === "updateMembre")       result = updateMembre(ss, body.idMembre, body.data);
+    else if (a === "deleteMembre")       result = deleteMembre(ss, body.idMembre);
     else if (a === "ensureCommentaireColumn") result = ensureCommentaireColumn(ss);
-    else if (a === "ensureTacheSheet") result = ensureTacheSheet(ss);
-    else if (a === "addTache") result = addTache(ss, body.data);
-    else if (a === "updateTache") result = updateTache(ss, body.idTache, body.data);
-    else if (a === "deleteTache") result = deleteTache(ss, body.idTache);
+    else if (a === "ensureTacheSheet")   result = ensureTacheSheet(ss);
+    else if (a === "addTache")           result = addTache(ss, body.data);
+    else if (a === "updateTache")        result = updateTache(ss, body.idTache, body.data);
+    else if (a === "deleteTache")        result = deleteTache(ss, body.idTache);
+    else if (a === "addEvenement")       result = addEvenement(ss, body.data);
+    else if (a === "updateEvenement")    result = updateEvenement(ss, body.idEvenement, body.data);
+    else if (a === "deleteEvenement")    result = deleteEvenement(ss, body.idEvenement);
+    else if (a === "addAssiduite")       result = addAssiduite(ss, body.data);
+    else if (a === "updateAssiduite")    result = updateAssiduite(ss, body.idAssiduite, body.data);
+    else if (a === "deleteAssiduite")    result = deleteAssiduite(ss, body.idAssiduite);
+    else if (a === "upsertAssiduite")    result = upsertAssiduite(ss, body.idEvenement, body.idPersonne, body.statut, body.notes);
+    else if (a === "seedEvenements")     result = seedEvenements(ss);
+    else if (a === "seedAssiduite")      result = seedAssiduite(ss);
     else result = { error: "Action inconnue : " + a };
     return jsonResponse(result);
   } catch (err) {
@@ -437,4 +448,249 @@ function sheetToObjects(ss, nom) {
 
 function jsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── INSPECTION ────────────────────────────────────────────
+
+function inspectSheets(ss) {
+  return ss.getSheets().map(function(sh) {
+    var lc = sh.getLastColumn();
+    var lr = sh.getLastRow();
+    var headers = lc > 0 ? sh.getRange(1, 1, 1, lc).getValues()[0] : [];
+    var sample = (lr > 1 && lc > 0) ? sh.getRange(2, 1, 1, lc).getValues()[0] : [];
+    return { nom: sh.getName(), lignes: lr - 1, colonnes: lc, entetes: headers, exemple: sample };
+  });
+}
+
+// ── EVENEMENT — LECTURE ───────────────────────────────────
+
+function getEvenements(ss, categorie) {
+  var rows = sheetToObjects(ss, "EVENEMENT");
+  return rows
+    .filter(function(r) { return !categorie || String(r["Categorie"]).toLowerCase() === String(categorie).toLowerCase(); })
+    .map(function(r) {
+      return {
+        ID_Evenement:  String(r["ID"]),
+        Titre:         r["Titre"] || "",
+        Date:          fmtDate(r["Date"]),
+        Heure_Debut:   r["Heure_Debut"] || "",
+        Heure_Fin:     r["Heure_Fin"] || "",
+        Salle:         r["Salle"] || "",
+        Animateur:     r["Animateur"] || "",
+        Categorie:     r["Categorie"] || "",
+        Statut:        r["Statut"] || ""
+      };
+    });
+}
+
+// ── EVENEMENT — ECRITURE ──────────────────────────────────
+
+function addEvenement(ss, data) {
+  var sh = ss.getSheetByName("EVENEMENT");
+  if (!sh) return { error: "Feuille EVENEMENT introuvable" };
+  var id = nextId(sh);
+  appendByHeader(sh, {
+    "ID":          id,
+    "Titre":       data.Titre || "",
+    "Date":        data.Date ? parseDateFr(data.Date) : "",
+    "Heure_Debut": data.Heure_Debut || "",
+    "Heure_Fin":   data.Heure_Fin || "",
+    "Salle":       data.Salle || "",
+    "Animateur":   data.Animateur || "",
+    "Categorie":   data.Categorie || "",
+    "Statut":      data.Statut || "planifie"
+  });
+  return { ok: true, ID_Evenement: String(id) };
+}
+
+function updateEvenement(ss, idEvenement, data) {
+  var sh = ss.getSheetByName("EVENEMENT");
+  if (!sh) return { error: "Feuille EVENEMENT introuvable" };
+  var map = {};
+  if (data.Titre !== undefined)       map["Titre"] = data.Titre;
+  if (data.Date !== undefined)        map["Date"] = parseDateFr(data.Date);
+  if (data.Heure_Debut !== undefined) map["Heure_Debut"] = data.Heure_Debut;
+  if (data.Heure_Fin !== undefined)   map["Heure_Fin"] = data.Heure_Fin;
+  if (data.Salle !== undefined)       map["Salle"] = data.Salle;
+  if (data.Animateur !== undefined)   map["Animateur"] = data.Animateur;
+  if (data.Categorie !== undefined)   map["Categorie"] = data.Categorie;
+  if (data.Statut !== undefined)      map["Statut"] = data.Statut;
+  var ok = updateRowByHeader(sh, idEvenement, map);
+  return ok ? { ok: true } : { error: "Evenement introuvable" };
+}
+
+function deleteEvenement(ss, idEvenement) {
+  var n = deleteRowsWhere(ss.getSheetByName("EVENEMENT"), "ID", [String(idEvenement)]);
+  return n > 0 ? { ok: true } : { error: "Evenement introuvable" };
+}
+
+// ── ASSIDUITE — LECTURE ───────────────────────────────────
+
+function getAssiduite(ss, idEvenement, idPersonne) {
+  var rows = sheetToObjects(ss, "ASSIDUITE");
+  return rows
+    .filter(function(r) {
+      var matchE = !idEvenement || String(r["ID_Evenement"]) === String(idEvenement);
+      var matchP = !idPersonne  || String(r["ID_Personne"])  === String(idPersonne);
+      return matchE && matchP;
+    })
+    .map(function(r) {
+      return {
+        ID_Assiduite:  String(r["ID"]),
+        ID_Evenement:  String(r["ID_Evenement"]),
+        ID_Personne:   String(r["ID_Personne"]),
+        Statut:        r["Statut"] || "present",
+        Notes:         r["Notes"] || ""
+      };
+    });
+}
+
+// ── ASSIDUITE — ECRITURE ──────────────────────────────────
+
+function addAssiduite(ss, data) {
+  var sh = ss.getSheetByName("ASSIDUITE");
+  if (!sh) return { error: "Feuille ASSIDUITE introuvable" };
+  var id = nextId(sh);
+  appendByHeader(sh, {
+    "ID":           id,
+    "ID_Evenement": data.ID_Evenement || "",
+    "ID_Personne":  data.ID_Personne || "",
+    "Statut":       data.Statut || "present",
+    "Notes":        data.Notes || ""
+  });
+  return { ok: true, ID_Assiduite: String(id) };
+}
+
+function updateAssiduite(ss, idAssiduite, data) {
+  var sh = ss.getSheetByName("ASSIDUITE");
+  if (!sh) return { error: "Feuille ASSIDUITE introuvable" };
+  var map = {};
+  if (data.Statut !== undefined) map["Statut"] = data.Statut;
+  if (data.Notes !== undefined)  map["Notes"] = data.Notes;
+  var ok = updateRowByHeader(sh, idAssiduite, map);
+  return ok ? { ok: true } : { error: "Ligne assiduite introuvable" };
+}
+
+function deleteAssiduite(ss, idAssiduite) {
+  var n = deleteRowsWhere(ss.getSheetByName("ASSIDUITE"), "ID", [String(idAssiduite)]);
+  return n > 0 ? { ok: true } : { error: "Ligne assiduite introuvable" };
+}
+
+// upsert : cree ou met a jour la ligne (idEvenement x idPersonne)
+function upsertAssiduite(ss, idEvenement, idPersonne, statut, notes) {
+  var sh = ss.getSheetByName("ASSIDUITE");
+  if (!sh) return { error: "Feuille ASSIDUITE introuvable" };
+  var rows = sheetToObjects(ss, "ASSIDUITE");
+  var existing = rows.filter(function(r) {
+    return String(r["ID_Evenement"]) === String(idEvenement) && String(r["ID_Personne"]) === String(idPersonne);
+  })[0];
+  if (existing) {
+    var map = { "Statut": statut || "present" };
+    if (notes !== undefined) map["Notes"] = notes;
+    updateRowByHeader(sh, existing["ID"], map);
+    return { ok: true, action: "updated", ID_Assiduite: String(existing["ID"]) };
+  }
+  var id = nextId(sh);
+  appendByHeader(sh, {
+    "ID": id, "ID_Evenement": idEvenement, "ID_Personne": idPersonne,
+    "Statut": statut || "present", "Notes": notes || ""
+  });
+  return { ok: true, action: "created", ID_Assiduite: String(id) };
+}
+
+// ── SEED — DONNEES FICTIVES ───────────────────────────────
+
+function seedEvenements(ss) {
+  var sh = ss.getSheetByName("EVENEMENT");
+  if (!sh) return { error: "Feuille EVENEMENT introuvable" };
+  var existing = sh.getLastRow();
+  if (existing > 1) return { ok: false, message: "Des donnees existent deja (" + (existing - 1) + " lignes). Supprimer avant de seeder." };
+
+  var evenements = [
+    { Titre: "Cours FLE - Groupe Alpha",      Date: new Date(2025, 3, 7),  Heure_Debut: "09:00", Heure_Fin: "11:00", Salle: "Salle A", Animateur: "Sophie Martin",   Categorie: "cours",      Statut: "termine" },
+    { Titre: "Cours FLE - Groupe A1",         Date: new Date(2025, 3, 14), Heure_Debut: "09:00", Heure_Fin: "11:00", Salle: "Salle A", Animateur: "Sophie Martin",   Categorie: "cours",      Statut: "termine" },
+    { Titre: "Cours FLE - Groupe A1",         Date: new Date(2025, 3, 21), Heure_Debut: "09:00", Heure_Fin: "11:00", Salle: "Salle A", Animateur: "Sophie Martin",   Categorie: "cours",      Statut: "termine" },
+    { Titre: "Atelier numerique",             Date: new Date(2025, 3, 28), Heure_Debut: "14:00", Heure_Fin: "16:00", Salle: "Salle B", Animateur: "Marc Leblanc",    Categorie: "atelier",    Statut: "termine" },
+    { Titre: "Cours FLE - Groupe B1",         Date: new Date(2025, 4, 5),  Heure_Debut: "09:00", Heure_Fin: "11:00", Salle: "Salle A", Animateur: "Sophie Martin",   Categorie: "cours",      Statut: "termine" },
+    { Titre: "Atelier insertion pro",         Date: new Date(2025, 4, 12), Heure_Debut: "14:00", Heure_Fin: "17:00", Salle: "Grande salle", Animateur: "Marc Leblanc", Categorie: "atelier",   Statut: "termine" },
+    { Titre: "Journee portes ouvertes",       Date: new Date(2025, 4, 17), Heure_Debut: "10:00", Heure_Fin: "17:00", Salle: "Tout le centre", Animateur: "Equipe",    Categorie: "evenement",  Statut: "termine" },
+    { Titre: "Cours FLE - Groupe Alpha",      Date: new Date(2025, 4, 26), Heure_Debut: "09:00", Heure_Fin: "11:00", Salle: "Salle A", Animateur: "Sophie Martin",   Categorie: "cours",      Statut: "termine" },
+    { Titre: "Cours FLE - Groupe A1",         Date: new Date(2025, 5, 2),  Heure_Debut: "09:00", Heure_Fin: "11:00", Salle: "Salle A", Animateur: "Sophie Martin",   Categorie: "cours",      Statut: "planifie" },
+    { Titre: "Atelier numerique",             Date: new Date(2025, 5, 9),  Heure_Debut: "14:00", Heure_Fin: "16:00", Salle: "Salle B", Animateur: "Marc Leblanc",    Categorie: "atelier",    Statut: "planifie" },
+  ];
+
+  var id = 1;
+  evenements.forEach(function(ev) {
+    appendByHeader(sh, {
+      "ID": id++, "Titre": ev.Titre, "Date": ev.Date,
+      "Heure_Debut": ev.Heure_Debut, "Heure_Fin": ev.Heure_Fin,
+      "Salle": ev.Salle, "Animateur": ev.Animateur,
+      "Categorie": ev.Categorie, "Statut": ev.Statut
+    });
+  });
+  return { ok: true, inserted: evenements.length };
+}
+
+function seedAssiduite(ss) {
+  var sh = ss.getSheetByName("ASSIDUITE");
+  if (!sh) return { error: "Feuille ASSIDUITE introuvable" };
+  var existing = sh.getLastRow();
+  if (existing > 1) return { ok: false, message: "Des donnees existent deja (" + (existing - 1) + " lignes). Supprimer avant de seeder." };
+
+  // IDs PERSONNE connus : adultes FLE
+  // 16=Mariama(Alpha,EN COURS) 11=Fatou(A1-,En cours) 14=Saba(A1+,En cours) 9=Karim(B1,En cours) 12=Mira(A2+/B1,En cours)
+  // 7=Amal(Alpha,Arrete) 1=Leila(A1+,Arrete) 5=Esra(A1-,Arrete)
+  // Evenement IDs : 1=Alpha 2=A1(14avr) 3=A1(21avr) 4=atelier num 5=B1 6=atelier pro 7=JPO 8=Alpha(26mai) 9=A1(2juin) 10=atelier num(9juin)
+
+  var lignes = [
+    // Ev 1 — Cours Alpha (07/04) : Mariama, Amal
+    [1,  16, "present",  ""],
+    [2,  7,  "absent",   ""],
+    // Ev 2 — Cours A1 (14/04) : Fatou, Saba, Leila, Esra
+    [3,  11, "present",  ""],
+    [4,  14, "present",  ""],
+    [5,  1,  "absent",   ""],
+    [6,  5,  "excuse",   "Rendez-vous medical"],
+    // Ev 3 — Cours A1 (21/04) : Fatou, Saba, Leila, Esra
+    [7,  11, "absent",   ""],
+    [8,  14, "present",  ""],
+    [9,  1,  "absent",   ""],
+    [10, 5,  "present",  ""],
+    // Ev 4 — Atelier numerique (28/04) : tous
+    [11, 16, "present",  ""],
+    [12, 11, "present",  ""],
+    [13, 14, "retard",   "Arrivee 14h30"],
+    [14, 9,  "present",  ""],
+    [15, 12, "present",  ""],
+    [16, 7,  "absent",   ""],
+    // Ev 5 — Cours B1 (05/05) : Karim, Mira
+    [17, 9,  "present",  ""],
+    [18, 12, "absent",   ""],
+    // Ev 6 — Atelier insertion pro (12/05) : tous
+    [19, 16, "present",  ""],
+    [20, 11, "excuse",   ""],
+    [21, 14, "present",  ""],
+    [22, 9,  "present",  ""],
+    [23, 12, "present",  ""],
+    // Ev 7 — Journee portes ouvertes (17/05) : tous
+    [24, 16, "present",  ""],
+    [25, 11, "present",  ""],
+    [26, 14, "present",  ""],
+    [27, 9,  "absent",   ""],
+    [28, 12, "present",  ""],
+    [29, 7,  "present",  ""],
+    // Ev 8 — Cours Alpha (26/05) : Mariama, Amal
+    [30, 16, "absent",   ""],
+    [31, 7,  "absent",   ""],
+  ];
+
+  var idEv   = [1,1, 2,2,2,2, 3,3,3,3, 4,4,4,4,4,4, 5,5, 6,6,6,6,6, 7,7,7,7,7,7, 8,8];
+  var idLine = 1;
+  lignes.forEach(function(l, i) {
+    appendByHeader(sh, {
+      "ID": idLine++, "ID_Evenement": idEv[i], "ID_Personne": l[1],
+      "Statut": l[2], "Notes": l[3]
+    });
+  });
+  return { ok: true, inserted: lignes.length };
 }
