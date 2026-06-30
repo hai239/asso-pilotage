@@ -15,6 +15,7 @@ import {
   BarChart2,
   UserCheck,
   GraduationCap,
+  Search,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { moduleForPath } from "@/lib/modules"
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/emargement",    label: "Émargement",      icon: ClipboardCheck,  accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
   { href: "/assiduite",     label: "Assiduité",        icon: BarChart2,        accent: "bg-absences-light text-absences-dark",            dot: "bg-absences" },
   { href: "/finances",      label: "Finances",        icon: Euro,            accent: "bg-finances-light text-finances-dark",           dot: "bg-finances" },
+  { href: "/veille-subventions", label: "Veille subventions", icon: Search,     accent: "bg-subventions-light text-subventions-dark",     dot: "bg-subventions" },
   { href: "/ateliers",       label: "Ateliers",        icon: BookOpen,        accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
   { href: "/familles",      label: "Familles",         icon: UserCheck,       accent: "bg-familles-light text-familles-dark",           dot: "bg-familles" },
   { href: "/positionnement", label: "Test de positionnement", icon: GraduationCap, accent: "bg-positionnement-light text-positionnement-dark", dot: "bg-positionnement" },

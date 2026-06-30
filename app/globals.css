@@ -45,6 +45,11 @@
   --color-benevoles-light: #e3f7f7;
   --color-benevoles-dark: #1a9494;
 
+  /* Veille subventions → violet (distinct des modules métier existants) */
+  --color-subventions: #8b5cf6;
+  --color-subventions-light: #ede9fe;
+  --color-subventions-dark: #6d28d9;
+
   --color-alert: #ef4444;
 
   /* Familles → violet */
@@ -98,6 +103,10 @@
   --color-positionnement: var(--color-positionnement);
   --color-positionnement-light: var(--color-positionnement-light);
   --color-positionnement-dark: var(--color-positionnement-dark);
+
+  --color-subventions: var(--color-subventions);
+  --color-subventions-light: var(--color-subventions-light);
+  --color-subventions-dark: var(--color-subventions-dark);
 
   --color-alert: var(--color-alert);
 
