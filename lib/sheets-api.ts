@@ -3,8 +3,7 @@
 // Couche d'accès Google Sheets — nouvelle base structurée
 // ──────────────────────────────────────────────
 
-// URL à renseigner dans .env.local : NEXT_PUBLIC_SHEETS_API_URL=https://script.google.com/...
-const API_URL = process.env.NEXT_PUBLIC_SHEETS_API_URL ?? ""
+const API_URL = "/api/sheets"
 
 // ── Types correspondant à la nouvelle base ─────
 
