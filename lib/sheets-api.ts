@@ -28,6 +28,7 @@ export interface MembreSheet {
   Niveau: string
   Type_Apprenant?: string
   Source_Orientation: string
+  Date_Inscription?: string
   Nb_Enfants: number | string
   Notes: string
 }

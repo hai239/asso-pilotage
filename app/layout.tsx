@@ -9,6 +9,7 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "Asso – Pilotage",
   description: "Interface de gestion de l'association",
+  icons: { icon: "/logo-area.png", apple: "/logo-area.png" },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

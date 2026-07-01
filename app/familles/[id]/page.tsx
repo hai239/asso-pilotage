@@ -6,11 +6,41 @@ import { useRouter } from "next/navigation"
 import SlideOver, { Field, Input, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 import JournalSuivi from "@/components/JournalSuivi"
 import AdresseAutocomplete from "@/components/AdresseAutocomplete"
-import { ChevronRight, Pencil, Plus, MapPin } from "lucide-react"
+import DateInput from "@/components/DateInput"
+import { ChevronRight, Pencil, Plus, Upload, RotateCcw } from "lucide-react"
 import {
-  fetchFamilles, fetchMembres, updateFamille, addMembre, deleteMembre,
+  fetchFamilles, fetchMembres, updateFamille, addMembre, deleteMembre, uploadFichier,
   type FamilleSheet, type MembreSheet
 } from "@/lib/sheets-api"
+
+function parseDateOcr(s?: string): string {
+  if (!s) return ""
+  const parts = s.split("/")
+  if (parts.length !== 3) return ""
+  const [d, m, y] = parts
+  return `${y}-${m?.padStart(2, "0")}-${d?.padStart(2, "0")}`
+}
+
+function normaliserTelephone(tel?: string): string {
+  if (!tel) return ""
+  // Supprimer tout sauf les chiffres
+  const digits = tel.replace(/\D/g, "")
+  // Numéro français sans indicatif : s'assurer qu'il commence par 0
+  if (digits.length === 9 && !digits.startsWith("0")) return "0" + digits
+  if (digits.length === 10) return digits
+  // Indicatif +33 → remplacer par 0
+  if (digits.startsWith("33") && digits.length === 11) return "0" + digits.slice(2)
+  return digits
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "")
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
 const niveauStyle: Record<string, string> = {
   "Alpha":   "bg-slate-100 text-slate-600",
@@ -46,6 +76,10 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
   const [slideMode, setSlideMode] = useState<"edit" | "add">("edit")
   const [familleForm, setFamilleForm] = useState<Partial<FamilleSheet>>({})
   const [membreForm, setMembreForm]   = useState<Partial<MembreSheet>>(emptyMembre(id))
+  const [membreFichier, setMembreFichier] = useState<File | null>(null)
+  const [ocrLoading, setOcrLoading]       = useState(false)
+  const [ocrDone, setOcrDone]             = useState(false)
+  const [saving, setSaving]               = useState(false)
 
   const loadData = useCallback(async () => {
     try {
@@ -79,10 +113,50 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
     setSlideOpen(false)
   }
 
+  async function handleOcr(file: File) {
+    setOcrLoading(true)
+    setOcrDone(false)
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch("/api/ocr", { method: "POST", body: formData })
+      if (!res.ok) { console.error("[ocr] erreur", await res.text()); return }
+      const data = await res.json()
+      setMembreForm(f => ({
+        ...f,
+        Nom:            String(data.nom     ?? f.Nom     ?? ""),
+        Prenom:         String(data.prenom  ?? f.Prenom  ?? ""),
+        Telephone:      normaliserTelephone(data.telephones?.[0]) || f.Telephone || "",
+        Date_Naissance: parseDateOcr(data.date_naissance) || (f.Date_Naissance ?? ""),
+      }))
+      setOcrDone(true)
+    } catch (e) { console.error("[ocr]", e) }
+    finally { setOcrLoading(false) }
+  }
+
   async function handleAddMembre() {
-    await addMembre(membreForm)
+    if (saving) return
+    setSaving(true)
+    const result = await addMembre(membreForm)
+    if (result?.ID_Membre) {
+      if (membreFichier) {
+        try {
+          const b64 = await fileToBase64(membreFichier)
+          await uploadFichier({
+            idMembre:   result.ID_Membre,
+            categorie:  "Fiche d'inscription",
+            nom:        membreFichier.name,
+            mimeType:   membreFichier.type || "application/pdf",
+            dataBase64: b64,
+          })
+        } catch (e) { console.error("[upload doc]", e) }
+      }
+    }
     await loadData()
     setMembreForm(emptyMembre(id))
+    setMembreFichier(null)
+    setOcrDone(false)
+    setSaving(false)
     setSlideOpen(false)
   }
 
@@ -97,6 +171,22 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
   }
 
   const quartier = String(famille.Quartier_QVP ?? "").trim()
+
+  // Dérivé des membres (pas d'appel API supplémentaire)
+  const contactPrincipal = membres.find(m => String(m.Contact_Principal ?? "").toLowerCase() === "oui") ?? null
+  const nbAdultes = membres.filter(m => m.Role === "Adulte").length
+  const nbEnfants = membres.filter(m => m.Role === "Enfant").length
+  const composition = [
+    nbAdultes ? `${nbAdultes} adulte${nbAdultes > 1 ? "s" : ""}` : "",
+    nbEnfants ? `${nbEnfants} enfant${nbEnfants > 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" · ")
+
+  const champsFamille: { label: string; value: string }[] = [
+    { label: "Adresse", value: String(famille.Adresse_Complete || famille.Adresse || "") },
+    { label: "Quartier QVP", value: quartier || "Hors QVP" },
+    { label: "Composition", value: composition },
+    { label: "Nombre de membres", value: String(membres.length) },
+  ].filter(c => c.value !== "")
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -124,27 +214,26 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
 
       {/* Infos famille */}
       <div className="bg-surface border border-border rounded-xl p-5 mb-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          {(famille.Adresse_Complete || famille.Adresse) && (
-            <div className="flex items-start gap-2">
-              <MapPin size={15} className="text-muted mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs text-muted mb-0.5">Adresse</p>
-                <p className="font-medium">{famille.Adresse_Complete || famille.Adresse}</p>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+          {champsFamille.map(c => (
+            <div key={c.label}>
+              <p className="text-xs text-muted mb-0.5">{c.label}</p>
+              <p className="text-sm font-medium text-foreground">{c.value}</p>
             </div>
-          )}
-          <div>
-            <p className="text-xs text-muted mb-1">Quartier QVP</p>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${quartier ? "bg-familles-light text-familles-dark" : "bg-slate-100 text-slate-500"}`}>
-              {quartier || "—"}
-            </span>
-          </div>
-          <div>
-            <p className="text-xs text-muted mb-1">Membres</p>
-            <p className="font-medium">{membres.length}</p>
-          </div>
+          ))}
         </div>
+
+        {contactPrincipal && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <p className="text-xs text-muted mb-0.5">Contact principal</p>
+            <Link
+              href={`/familles/${id}/membre/${contactPrincipal.ID_Membre}`}
+              className="text-sm font-medium text-familles-dark hover:underline"
+            >
+              {contactPrincipal.Prenom} {contactPrincipal.Nom}
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Section Membres */}
@@ -154,7 +243,7 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
           <span className="ml-2 text-xs font-normal text-muted">({membres.length})</span>
         </h2>
         <button
-          onClick={() => { setMembreForm(emptyMembre(id)); setSlideMode("add"); setSlideOpen(true) }}
+          onClick={() => { setMembreForm(emptyMembre(id)); setMembreFichier(null); setOcrDone(false); setSlideMode("add"); setSlideOpen(true) }}
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-familles text-white text-sm font-medium hover:bg-familles-dark transition-colors"
         >
           <Plus size={14} />
@@ -269,6 +358,9 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
               <option value="Soutien scolaire">Soutien scolaire</option>
             </Select>
           </Field>
+          <Field label="Date de naissance">
+            <DateInput value={membreForm.Date_Naissance} onChange={v => setMembreForm(f => ({ ...f, Date_Naissance: v }))} />
+          </Field>
           <Field label="Niveau / Classe (soutien scolaire uniquement)">
             <Select value={String(membreForm.Niveau ?? "")} onChange={e => setMembreForm(f => ({ ...f, Niveau: e.target.value }))}>
               <option value="">— Choisir —</option>
@@ -289,7 +381,39 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
               <option value="ARRÊTÉ">ARRÊTÉ</option>
             </Select>
           </Field>
-          <SaveButton />
+          <Field label="Date d'inscription">
+            <DateInput value={membreForm.Date_Inscription} onChange={v => setMembreForm(f => ({ ...f, Date_Inscription: v }))} />
+          </Field>
+          <Field label="Bulletin d'inscription (PDF)">
+            <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-surface text-sm text-muted cursor-pointer hover:border-familles transition-colors w-fit">
+              <Upload size={15} />
+              Choisir un fichier
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0] ?? null
+                  setMembreFichier(file)
+                  setOcrDone(false)
+                  if (file) handleOcr(file)
+                }}
+              />
+            </label>
+            {ocrLoading && (
+              <p className="flex items-center gap-1.5 text-xs text-muted mt-1.5">
+                <RotateCcw size={12} className="animate-spin" />
+                Analyse du bulletin en cours…
+              </p>
+            )}
+            {!ocrLoading && ocrDone && (
+              <p className="text-xs text-finances-dark mt-1.5">Champs pré-remplis ✓</p>
+            )}
+            {!ocrLoading && !ocrDone && membreFichier && (
+              <p className="text-xs text-muted mt-1.5">{membreFichier.name}</p>
+            )}
+          </Field>
+          <SaveButton label={saving ? "Enregistrement…" : "Enregistrer"} />
         </form>
       </SlideOver>
     </div>

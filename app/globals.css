@@ -51,6 +51,11 @@
   --color-familles: #7c3aed;
   --color-familles-light: #ede9fe;
   --color-familles-dark: #5b21b6;
+
+  /* Positionnement → bleu indigo */
+  --color-positionnement: #4f46e5;
+  --color-positionnement-light: #e0e7ff;
+  --color-positionnement-dark: #3730a3;
 }
 
 @theme inline {
@@ -89,6 +94,10 @@
   --color-familles: var(--color-familles);
   --color-familles-light: var(--color-familles-light);
   --color-familles-dark: var(--color-familles-dark);
+
+  --color-positionnement: var(--color-positionnement);
+  --color-positionnement-light: var(--color-positionnement-light);
+  --color-positionnement-dark: var(--color-positionnement-dark);
 
   --color-alert: var(--color-alert);
 
