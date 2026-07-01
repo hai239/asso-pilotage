@@ -51,6 +51,8 @@ export async function GET(request: NextRequest) {
         return ok(await getIntervenants(sheets))
       case "getBeneficiaires":
         return ok(await getBeneficiaires(sheets, searchParams.get("audience") ?? undefined))
+      case "getEvaluations":
+        return ok(await getEvaluations(sheets))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -93,6 +95,8 @@ export async function POST(request: NextRequest) {
       case "addIntervenant":    return ok(await addIntervenant(sheets, body.data))
       case "updateIntervenant": return ok(await updateIntervenant(sheets, body.idIntervenant, body.data))
       case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
+      case "upsertEvaluation":  return ok(await upsertEvaluation(sheets, String(body.idPersonne), body.session, body.data))
+      case "deleteEvaluation":  return ok(await deleteEvaluation(sheets, body.idEvaluation))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
       default:
@@ -414,8 +418,19 @@ function inscriptionCourante(insc: Record<string, unknown>[]): Record<string, un
   )
 }
 
+/** Normalise la colonne "Session" d'une ligne EVALUATION. Les lignes créées
+ *  avant l'ajout de cette colonne (ou saisies via l'onglet Notes sans la
+ *  préciser) sont traitées comme "initial" — c'est le comportement historique
+ *  (une seule évaluation par personne, avant la distinction initial/final). */
+function evalSession(e: Record<string, unknown>): "initial" | "final" {
+  return String(e["Session"] ?? "").toLowerCase().trim() === "final" ? "final" : "initial"
+}
+
 /** Bénéficiaires (élèves/parents) prêts pour la composition de groupes :
- *  type, statut, disponibilité, niveau + les 4 notes du dernier positionnement. */
+ *  type, statut, disponibilité, niveau + les 4 notes de l'évaluation INITIALE.
+ *  ⚠️ Ne jamais utiliser l'évaluation finale ici : elle mesure la progression
+ *  en fin d'année, après la composition des groupes — s'en servir fausserait
+ *  le placement des bénéficiaires (cf. lib/positionnement.ts). */
 async function getBeneficiaires(sheets: Sheets, audience?: string) {
   const [personnes, inscriptions, evaluations] = await Promise.all([
     sheetToObjects(sheets, "PERSONNE"),
@@ -427,8 +442,8 @@ async function getBeneficiaires(sheets: Sheets, audience?: string) {
       const id = String(p["ID"])
       const insc = inscriptions.filter((i) => String(i["Personne ID"]) === id)
       const lastInsc = inscriptionCourante(insc)
-      const evals = evaluations.filter((e) => String(e["Personne ID"]) === id)
-      const lastEval = evals.length > 0 ? evals[evals.length - 1] : null
+      const evalsInitiales = evaluations.filter((e) => String(e["Personne ID"]) === id && evalSession(e) === "initial")
+      const evalInitiale = evalsInitiales.length > 0 ? evalsInitiales[evalsInitiales.length - 1] : null
       const type = String(p["Categorie"]).toLowerCase().startsWith("enfant") ? "eleve" : "parent"
       return {
         ID_Personne: id,
@@ -442,16 +457,78 @@ async function getBeneficiaires(sheets: Sheets, audience?: string) {
         Niveau_Classe: lastInsc ? (lastInsc["Niveau / Classe"] ?? "") : "",
         Disponibilite: lastInsc ? (lastInsc["Disponibilite"] ?? "") : "",
         Type_Apprenant: lastInsc ? (lastInsc["Type apprenant"] ?? "") : "",
-        Niveau_CECRL: lastEval ? (lastEval["Niveau attribue"] ?? "") : "",
+        Niveau_CECRL: evalInitiale ? (evalInitiale["Niveau attribue"] ?? "") : "",
         notes: {
-          comprehensionEcrite: numOrNull(lastEval?.["Note comprehension ecrite"]),
-          comprehensionOrale:  numOrNull(lastEval?.["Note comprehension orale"]),
-          expressionEcrite:    numOrNull(lastEval?.["Note expression ecrite"]),
-          expressionOrale:     numOrNull(lastEval?.["Note expression orale"]),
+          comprehensionEcrite: numOrNull(evalInitiale?.["Note comprehension ecrite"]),
+          comprehensionOrale:  numOrNull(evalInitiale?.["Note comprehension orale"]),
+          expressionEcrite:    numOrNull(evalInitiale?.["Note expression ecrite"]),
+          expressionOrale:     numOrNull(evalInitiale?.["Note expression orale"]),
         },
       }
     })
     .filter((b) => !audience || (audience === "parents" ? b.type === "parent" : b.type === "eleve"))
+}
+
+async function getEvaluations(sheets: Sheets) {
+  const rows = await sheetToObjects(sheets, "EVALUATION")
+  return rows.map((e) => ({
+    ID_Evaluation: String(e["ID"]),
+    ID_Personne: String(e["Personne ID"]),
+    Session: evalSession(e),
+    Date: fmtDate(e["Date"] as string),
+    Niveau: e["Niveau attribue"] ?? "",
+    Comprehension_Ecrite: numOrNull(e["Note comprehension ecrite"]),
+    Comprehension_Orale:  numOrNull(e["Note comprehension orale"]),
+    Expression_Ecrite:    numOrNull(e["Note expression ecrite"]),
+    Expression_Orale:     numOrNull(e["Note expression orale"]),
+    Evaluateur: e["Evaluateur"] ?? "",
+  }))
+}
+
+// ── ÉCRITURE EVALUATION (module Notes) ────────────────────
+
+/** Crée ou met à jour LA ligne EVALUATION d'une personne pour une session
+ *  donnée (initial/final) — une seule ligne par (personne, session). La
+ *  colonne "Session" est ajoutée à la volée si le Sheet ne l'a pas encore
+ *  (feuille créée avant l'introduction de la distinction initial/final). */
+async function upsertEvaluation(
+  sheets: Sheets,
+  idPersonne: string,
+  session: unknown,
+  data: Record<string, unknown>,
+) {
+  const sessionNorm = String(session ?? "").toLowerCase().trim() === "final" ? "final" : "initial"
+  await ensureColumn(sheets, "EVALUATION", "Session")
+
+  const mapping: Record<string, unknown> = {
+    "Session": sessionNorm,
+    "Date": data.Date ? isoToFr(data.Date) : "",
+    "Niveau attribue": data.Niveau ?? "",
+    "Note comprehension ecrite": data.Comprehension_Ecrite ?? "",
+    "Note comprehension orale":  data.Comprehension_Orale ?? "",
+    "Note expression ecrite":    data.Expression_Ecrite ?? "",
+    "Note expression orale":     data.Expression_Orale ?? "",
+    "Evaluateur": data.Evaluateur ?? "",
+  }
+
+  const rows = await sheetToObjects(sheets, "EVALUATION")
+  const existing = rows.find((e) =>
+    String(e["Personne ID"]) === idPersonne && evalSession(e) === sessionNorm,
+  )
+
+  if (existing) {
+    await updateRowById(sheets, "EVALUATION", String(existing["ID"]), mapping)
+    return { ok: true, ID_Evaluation: String(existing["ID"]) }
+  }
+
+  const id = await nextId(sheets, "EVALUATION")
+  await appendRow(sheets, "EVALUATION", { "ID": id, "Personne ID": idPersonne, ...mapping })
+  return { ok: true, ID_Evaluation: String(id) }
+}
+
+async function deleteEvaluation(sheets: Sheets, idEvaluation: string) {
+  const deleted = await deleteRowById(sheets, "EVALUATION", idEvaluation)
+  return deleted ? { ok: true } : { error: "Évaluation introuvable" }
 }
 
 async function getIntervenants(sheets: Sheets) {
