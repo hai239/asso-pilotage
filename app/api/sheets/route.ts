@@ -43,6 +43,8 @@ export async function GET(request: NextRequest) {
         return ok(await getEvenements(sheets, searchParams.get("categorie") ?? undefined))
       case "getAssiduite":
         return ok(await getAssiduite(sheets, searchParams.get("idEvenement") ?? undefined, searchParams.get("idPersonne") ?? undefined))
+      case "getPositionnements":
+        return ok(await getPositionnements(sheets))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -170,6 +172,30 @@ async function deleteDocument(sheets: Sheets, idDoc: string) {
   }
   const supprime = await deleteRowById(sheets, "DOCUMENTS JOINTS", String(idDoc))
   return supprime ? { ok: true } : { error: "Document introuvable" }
+}
+
+// ── POSITIONNEMENT ────────────────────────────────────────
+
+async function getPositionnements(sheets: Sheets) {
+  try {
+    const rows = await sheetToObjects(sheets, "POSITIONNEMENT")
+    const result: Record<string, Record<string, unknown>> = {}
+    for (const row of rows) {
+      const niveau = String(row["Niveau"] ?? "")
+      const catId = String(row["Categorie_ID"] ?? "")
+      if (!niveau || !catId) continue
+      if (!result[niveau]) result[niveau] = {}
+      result[niveau][catId] = {
+        contenu: row["Contenu"] ?? "",
+        transcription: row["Transcription"] ?? "",
+        audio: row["Audio_URL"] ?? "",
+        image: row["Image_URL"] ?? "",
+      }
+    }
+    return result
+  } catch {
+    return {}
+  }
 }
 
 // ── LECTURE ───────────────────────────────────────────────

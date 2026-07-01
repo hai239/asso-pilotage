@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Heart, LogOut, UserCircle,
-  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, Map,
+  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, Map, GraduationCap,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { ROLE_LABELS } from "@/lib/auth"
@@ -29,6 +29,7 @@ const modules: ModuleCard[] = [
   { href: "/emargement",    label: "Émargement",    sub: "Présences par séance",           icon: ClipboardCheck, accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
   { href: "/finances",      label: "Finances",      sub: "Financements, inscriptions",     icon: Euro,           accent: "bg-finances-light",     iconClass: "text-finances-dark" },
   { href: "/ateliers",      label: "Ateliers",      sub: "Planning, groupes",              icon: BookOpen,       accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
+  { href: "/positionnement", label: "Positionnement", sub: "Génération de tests",          icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/communication", label: "Communication", sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light", iconClass: "text-communication-dark" },
   { href: "/membres",       label: "Membres",       sub: "Annuaire équipe",                icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
   { href: "/roadmap",       label: "Roadmap",       sub: "Impact / facilité",              icon: Map,            accent: "bg-slate-100",          iconClass: "text-slate-700" },
