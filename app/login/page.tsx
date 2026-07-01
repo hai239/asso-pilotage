@@ -88,6 +88,13 @@ export default function LoginPage() {
             Les comptes sont créés par l'administratrice de l'association.
           </p>
         </div>
+
+        {/* Liens légaux */}
+        <nav aria-label="Pages légales" className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1">
+          <a href="/mentions-legales" className="text-xs text-muted hover:text-foreground transition-colors">Mentions légales</a>
+          <a href="/confidentialite" className="text-xs text-muted hover:text-foreground transition-colors">Confidentialité</a>
+          <a href="/accessibilite" className="text-xs text-muted hover:text-foreground transition-colors">Accessibilité</a>
+        </nav>
       </div>
     </div>
   )

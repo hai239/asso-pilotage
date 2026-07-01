@@ -5,24 +5,28 @@ import { useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import Sidebar from "./Sidebar"
 
+const LEGAL_PATHS = ["/mentions-legales", "/confidentialite", "/accessibilite"]
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
   const router   = useRouter()
   const pathname = usePathname()
 
-  const isPublic = pathname === "/login"
-  // Le tableau de bord est un "lanceur" plein écran : pas de sidebar.
-  // Elle reste présente sur toutes les autres pages connectées.
+  // Pages légales publiques : accessibles sans authentification, sans sidebar.
+  const isLegal = LEGAL_PATHS.includes(pathname)
+  const isLogin = pathname === "/login"
+  // Le tableau de bord est un "lanceur" plein écran : pas de sidebar (mais auth requise).
   const isDashboard = pathname === "/dashboard"
 
   useEffect(() => {
     if (loading) return
-    if (!user && !isPublic) router.replace("/login")
-    if (user  &&  isPublic) router.replace("/dashboard")
-  }, [user, loading, isPublic])
+    if (!user && !isLogin && !isLegal) router.replace("/login")
+    if (user  &&  isLogin) router.replace("/dashboard")
+  }, [user, loading, isLogin, isLegal])
 
-  // Page publique (login) : pas de sidebar
-  if (isPublic) {
+  // Pages autonomes (login, mentions/confidentialité/accessibilité) : pas de sidebar,
+  // accessibles connecté·e ou non.
+  if (isLegal || isLogin) {
     return <>{children}</>
   }
 
