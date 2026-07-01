@@ -65,6 +65,10 @@ interface Beneficiaire {
   notes: string
   statut: StatutBenef
   parentIds: number[]
+  niveauClasse?: string
+  disponibilite?: string
+  niveauCECRL?: string
+  typeApprenant?: string
 }
 
 interface Groupe {
@@ -84,6 +88,8 @@ function toGroupingInput(b: Beneficiaire): BeneficiairePourGroupage {
     id: b.id, prenom: b.prenom, nom: b.nom,
     dateNaissance: b.dateNaissance, statut: b.statut,
     positionnementInitial: b.positionnementInitial,
+    niveauClasse: b.niveauClasse,
+    disponibilite: b.disponibilite,
   }
 }
 
@@ -305,9 +311,11 @@ export default function BrouillonGroupesTab(props: {
     return beneficiaires.find(b => b.id === id)
   }
 
-  // Ateliers visibles : tous, mais on traite à part ceux sans compétence cochée
+  // Ateliers visibles dans le brouillon : on exclut le théâtre / marionnettes
+  // (mode "disponibilite") — leurs élèves sont choisis directement dans la fiche,
+  // sans passer par une composition de brouillon.
   const ateliersAffichables = sessions
-    .filter(s => s.statut !== "terminé" && s.statut !== "annulé")
+    .filter(s => s.statut !== "terminé" && s.statut !== "annulé" && s.modeGroupage !== "disponibilite")
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   if (ateliersAffichables.length === 0) {
@@ -328,7 +336,9 @@ export default function BrouillonGroupesTab(props: {
     <div className="flex flex-col gap-5">
       {ateliersAffichables.map(atelier => {
         const brouillon = brouillons[atelier.id]
-        const pasDeCompetence = atelier.competencesCiblees.length === 0
+        // En mode "disponibilité" (théâtre/marionnettes), les compétences ne sont
+        // pas requises : le groupage se fait par créneau, sans notes.
+        const pasDeCompetence = atelier.modeGroupage !== "disponibilite" && atelier.competencesCiblees.length === 0
 
         return (
           <article

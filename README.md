@@ -1,7 +1,8 @@
 # Asso Pilotage
 
 Dashboard de pilotage pour une association de formation numérique (Ada Tech School).
-**Next.js 16.2.6 · React 19 · Tailwind v4 · TypeScript · localStorage**
+**Next.js 16.2.6 · React 19 · Tailwind v4 · TypeScript**
+Persistance : `localStorage` (modules historiques) → migration en cours vers **Google Sheets** (API REST v4) pour **Familles** et **Ateliers**.
 
 🌐 **Production** : [asso-inky.vercel.app](https://asso-inky.vercel.app)
 📦 **Repo** : [github.com/anais0210/asso-pilotage](https://github.com/anais0210/asso-pilotage)
@@ -68,6 +69,41 @@ Pour comprendre pourquoi les choses sont faites ainsi.
 | Membres | `/membres` | Annuaire équipe |
 | Roadmap | `/roadmap` | Matrice impact/facilité |
 | Mon compte | `/compte` | Profil + changement de mot de passe |
+
+---
+
+## Chantier en cours — Module Ateliers sur Google Sheets
+
+Le module **Ateliers** est branché sur **Google Sheets** (API REST v4, via `app/api/sheets/route.ts`).
+Nécessite un fichier **`.env.local`** avec `GOOGLE_CLIENT_EMAIL` et `GOOGLE_PRIVATE_KEY` (compte de service ayant accès au classeur `BDD_Asso_CRM`).
+
+### Tables Google Sheets dédiées aux ateliers
+| Table | Rôle |
+|---|---|
+| `ATELIER` | 1 ligne = 1 atelier-groupe (`Categorie` = type, `Groupe` = niveau, dates, mode de groupage, organisation…) |
+| `ATELIER_BENEFICIAIRE` | jointure atelier ↔ élève/parent (→ `PERSONNE`) |
+| `ATELIER_INTERVENANT` | jointure atelier ↔ animateur (+ heures) (→ `INTERVENANT`) |
+| `INTERVENANT` | membres de l'asso : enseignantes FLE / stagiaires FLE / bénévoles / salariées |
+
+### ✅ Fait
+- **Lecture** depuis le Sheet : ateliers, bénéficiaires (`PERSONNE` + `INSCRIPTION` + `EVALUATION`), intervenants.
+- **Écriture** : création / édition / suppression d'atelier + synchronisation des jointures. Dates stockées au format **JJ/MM/AAAA**.
+- Correction du bug d'émargement (vraies colonnes `ASSIDUITE` : `Evenement ID / Personne ID / ETAT / Commentaire`).
+- **Formulaire** refondu : date début + fin (élèves) / date unique (parents), **liste déroulante de type éditable**, section **intervenants**, retrait de la sélection bénéficiaires + « importer un groupe ».
+- **Composition des groupes** :
+  - Élèves *par notes* → barrière de **cycle scolaire** (primaire+6e / collège+lycée), déduit de la **classe** (repli sur l'âge).
+  - **Théâtre / marionnettes** → sélection **directe** des élèves (sélecteur compact recherchable, filtré par niveau : marionnettes = élémentaire+6e, théâtre = collège+lycée+6e), **sans brouillon** → affichés directement dans l'onglet **Groupes**.
+  - Parents *par notes* (pas de cycle).
+- Toujours l'**inscription la plus récente** retenue (élève réinscrit chaque année → nouveau niveau).
+- Validation d'un brouillon → écrit les groupes dans le Sheet (1 ligne `ATELIER` par groupe).
+
+### ⏳ Reste à faire
+- Réutiliser le **sélecteur compact** pour les **intervenants** (démarré).
+- **Étape 7** — émargement **par groupe** : ajouter une colonne `Groupe ID` à `ASSIDUITE`.
+- **Étape 8** — **dashboard par type d'atelier** (quantitatif + qualitatif) : ajouter à `ATELIER` les colonnes heures salariés / stagiaires / bénévoles + objectifs atteints.
+- Décision base de données : scinder `INSCRIPTION."Niveau / Classe"` en `Niveau CECRL` + `Classe scolaire` (proposé, non fait).
+
+> ⚠️ Ne pas créer de données de test accentuées via `curl` (l'outil terminal casse l'UTF-8 → `U+FFFD`). Passer par le formulaire de l'appli ou un script Node (qui gère l'UTF-8).
 
 ---
 

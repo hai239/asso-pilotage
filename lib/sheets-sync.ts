@@ -162,6 +162,7 @@ export function rowToAtelier(row: Record<string, string>): AtelierPayload {
     tailleGroupeCible: row.tailleGroupeCible ? Number(row.tailleGroupeCible) : null,
     ratioEncadrement:  row.ratioEncadrement  ? Number(row.ratioEncadrement)  : null,
     mixerNiveaux: row.mixerNiveaux === "VRAI",
+    modeGroupage: row.modeGroupage === "disponibilite" ? "disponibilite" : "notes",
     taches:                 parseList<string[]>(row.taches, []),
     besoins:                parseList<string[]>(row.besoins, []),
     etapes:                 parseList<string[]>(row.etapes, []),

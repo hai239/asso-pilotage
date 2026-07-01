@@ -38,6 +38,12 @@ export async function GET(request: NextRequest) {
         return ok(await getEvenements(sheets, searchParams.get("categorie") ?? undefined))
       case "getAssiduite":
         return ok(await getAssiduite(sheets, searchParams.get("idEvenement") ?? undefined, searchParams.get("idPersonne") ?? undefined))
+      case "getAteliers":
+        return ok(await getAteliers(sheets, searchParams.get("audience") ?? undefined))
+      case "getIntervenants":
+        return ok(await getIntervenants(sheets))
+      case "getBeneficiaires":
+        return ok(await getBeneficiaires(sheets, searchParams.get("audience") ?? undefined))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -72,6 +78,9 @@ export async function POST(request: NextRequest) {
       case "updateAssiduite": return ok(await updateAssiduite(sheets, body.idAssiduite, body.data))
       case "deleteAssiduite": return ok(await deleteAssiduite(sheets, body.idAssiduite))
       case "upsertAssiduite": return ok(await upsertAssiduite(sheets, body.idEvenement, body.idPersonne, body.statut, body.notes))
+      case "addAtelier":      return ok(await addAtelier(sheets, body.data, body.beneficiaireIds, body.intervenantIds))
+      case "updateAtelier":   return ok(await updateAtelier(sheets, body.idAtelier, body.data, body.beneficiaireIds, body.intervenantIds))
+      case "deleteAtelier":   return ok(await deleteAtelier(sheets, body.idAtelier))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -193,17 +202,143 @@ async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: s
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
   return rows
     .filter((r) => {
-      const matchE = !idEvenement || String(r["ID_Evenement"]) === String(idEvenement)
-      const matchP = !idPersonne  || String(r["ID_Personne"])  === String(idPersonne)
+      const matchE = !idEvenement || String(r["Evenement ID"]) === String(idEvenement)
+      const matchP = !idPersonne  || String(r["Personne ID"])  === String(idPersonne)
       return matchE && matchP
     })
     .map((r) => ({
       ID_Assiduite: String(r["ID"]),
-      ID_Evenement: String(r["ID_Evenement"]),
-      ID_Personne:  String(r["ID_Personne"]),
-      Statut: r["Statut"] ?? "present",
-      Notes: r["Notes"] ?? "",
+      ID_Evenement: String(r["Evenement ID"]),
+      ID_Personne:  String(r["Personne ID"]),
+      Statut: r["ETAT"] ?? "present",
+      Notes: r["Commentaire"] ?? "",
     }))
+}
+
+// ── LECTURE ATELIERS ──────────────────────────────────────
+
+async function getAteliers(sheets: Sheets, audience?: string) {
+  const [ateliers, benefLinks, intervLinks] = await Promise.all([
+    sheetToObjects(sheets, "ATELIER"),
+    sheetToObjects(sheets, "ATELIER_BENEFICIAIRE"),
+    sheetToObjects(sheets, "ATELIER_INTERVENANT"),
+  ])
+  return ateliers
+    .filter((a) => !audience || String(a["Audience"]).toLowerCase() === audience.toLowerCase())
+    .map((a) => {
+      const id = String(a["ID"])
+      const beneficiaireIds = benefLinks
+        .filter((l) => String(l["Atelier ID"]) === id)
+        .map((l) => String(l["Personne ID"]))
+      const intervenants = intervLinks
+        .filter((l) => String(l["Atelier ID"]) === id)
+        .map((l) => ({
+          ID_Intervenant: String(l["Intervenant ID"]),
+          Heures: l["Heures"] ?? "",
+          Role: l["Role"] ?? "",
+        }))
+      const competences = String(a["Competences ciblees"] ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean)
+      return {
+        ID_Atelier: id,
+        Categorie: a["Categorie"] ?? "",
+        Groupe: a["Groupe"] ?? "",
+        Titre: a["Titre"] ?? "",
+        Audience: a["Audience"] ?? "",
+        Date_Debut: fmtDate(a["Date debut"] as string),
+        Date_Fin: fmtDate(a["Date fin"] as string),
+        Periode: a["Periode"] ?? "",
+        Heure_Debut: a["Heure debut"] ?? "",
+        Heure_Fin: a["Heure fin"] ?? "",
+        Salle: a["Salle"] ?? "",
+        Mode_Groupage: a["Mode groupage"] ?? "",
+        Taille_Cible: a["Taille cible"] ?? "",
+        Ratio_Encadrement: a["Ratio encadrement"] ?? "",
+        Competences_Ciblees: competences,
+        Taches: a["Taches"] ?? "",
+        Besoins: a["Besoins"] ?? "",
+        Etapes: a["Etapes"] ?? "",
+        Statut: a["Statut"] ?? "",
+        beneficiaireIds,
+        intervenants,
+      }
+    })
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === undefined || v === null || v === "") return null
+  const n = Number(String(v).replace(",", "."))
+  return isNaN(n) ? null : n
+}
+
+/** Année de début d'une "Annee scolaire" ("25-26" → 2025 ; vide → 0).
+ *  Sert à retenir l'inscription la plus récente d'un élève réinscrit chaque année. */
+function anneeScolaireStart(a: unknown): number {
+  const m = String(a ?? "").match(/(\d{2,4})/)
+  if (!m) return 0
+  const y = Number(m[1])
+  return y < 100 ? 2000 + y : y
+}
+
+/** Retourne l'inscription de l'année scolaire la plus récente (ou null). */
+function inscriptionCourante(insc: Record<string, unknown>[]): Record<string, unknown> | null {
+  if (insc.length === 0) return null
+  return insc.reduce((best, cur) =>
+    anneeScolaireStart(cur["Annee scolaire"]) >= anneeScolaireStart(best["Annee scolaire"]) ? cur : best,
+  )
+}
+
+/** Bénéficiaires (élèves/parents) prêts pour la composition de groupes :
+ *  type, statut, disponibilité, niveau + les 4 notes du dernier positionnement. */
+async function getBeneficiaires(sheets: Sheets, audience?: string) {
+  const [personnes, inscriptions, evaluations] = await Promise.all([
+    sheetToObjects(sheets, "PERSONNE"),
+    sheetToObjects(sheets, "INSCRIPTION"),
+    sheetToObjects(sheets, "EVALUATION"),
+  ])
+  return personnes
+    .map((p) => {
+      const id = String(p["ID"])
+      const insc = inscriptions.filter((i) => String(i["Personne ID"]) === id)
+      const lastInsc = inscriptionCourante(insc)
+      const evals = evaluations.filter((e) => String(e["Personne ID"]) === id)
+      const lastEval = evals.length > 0 ? evals[evals.length - 1] : null
+      const type = String(p["Categorie"]).toLowerCase().startsWith("enfant") ? "eleve" : "parent"
+      return {
+        ID_Personne: id,
+        type,
+        Prenom: p["Prenom"] ?? "",
+        Nom: p["Nom"] ?? "",
+        Date_Naissance: fmtDate(p["Date de naissance"] as string),
+        Email: p["Email"] ?? "",
+        Telephone: p["Telephone"] ?? "",
+        Statut_Inscription: lastInsc ? (lastInsc["Statut"] ?? "") : "",
+        Niveau_Classe: lastInsc ? (lastInsc["Niveau / Classe"] ?? "") : "",
+        Disponibilite: lastInsc ? (lastInsc["Disponibilite"] ?? "") : "",
+        Type_Apprenant: lastInsc ? (lastInsc["Type apprenant"] ?? "") : "",
+        Niveau_CECRL: lastEval ? (lastEval["Niveau attribue"] ?? "") : "",
+        notes: {
+          comprehensionEcrite: numOrNull(lastEval?.["Note comprehension ecrite"]),
+          comprehensionOrale:  numOrNull(lastEval?.["Note comprehension orale"]),
+          expressionEcrite:    numOrNull(lastEval?.["Note expression ecrite"]),
+          expressionOrale:     numOrNull(lastEval?.["Note expression orale"]),
+        },
+      }
+    })
+    .filter((b) => !audience || (audience === "parents" ? b.type === "parent" : b.type === "eleve"))
+}
+
+async function getIntervenants(sheets: Sheets) {
+  const rows = await sheetToObjects(sheets, "INTERVENANT")
+  return rows.map((r) => ({
+    ID_Intervenant: String(r["ID"]),
+    Nom: r["Nom"] ?? "",
+    Prenom: r["Prenom"] ?? "",
+    Type: r["Type"] ?? "",
+    Email: r["Email"] ?? "",
+    Telephone: r["Telephone"] ?? "",
+    Statut: r["Statut"] ?? "",
+  }))
 }
 
 // ── ÉCRITURE FAMILLE ──────────────────────────────────────
@@ -430,18 +565,18 @@ async function addAssiduite(sheets: Sheets, data: Record<string, unknown>) {
   const id = await nextId(sheets, "ASSIDUITE")
   await appendRow(sheets, "ASSIDUITE", {
     "ID": id,
-    "ID_Evenement": data.ID_Evenement ?? "",
-    "ID_Personne": data.ID_Personne ?? "",
-    "Statut": data.Statut ?? "present",
-    "Notes": data.Notes ?? "",
+    "Evenement ID": data.ID_Evenement ?? "",
+    "Personne ID": data.ID_Personne ?? "",
+    "ETAT": data.Statut ?? "present",
+    "Commentaire": data.Notes ?? "",
   })
   return { ok: true, ID_Assiduite: String(id) }
 }
 
 async function updateAssiduite(sheets: Sheets, idAssiduite: string, data: Record<string, unknown>) {
   const map: Record<string, unknown> = {}
-  if (data.Statut !== undefined) map["Statut"] = data.Statut
-  if (data.Notes !== undefined)  map["Notes"] = data.Notes
+  if (data.Statut !== undefined) map["ETAT"] = data.Statut
+  if (data.Notes !== undefined)  map["Commentaire"] = data.Notes
   const ok = await updateRowById(sheets, "ASSIDUITE", idAssiduite, map)
   return ok ? { ok: true } : { error: "Ligne assiduité introuvable" }
 }
@@ -461,13 +596,13 @@ async function upsertAssiduite(
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
   const existing = rows.find(
     (r) =>
-      String(r["ID_Evenement"]) === String(idEvenement) &&
-      String(r["ID_Personne"]) === String(idPersonne)
+      String(r["Evenement ID"]) === String(idEvenement) &&
+      String(r["Personne ID"]) === String(idPersonne)
   )
 
   if (existing) {
-    const map: Record<string, unknown> = { "Statut": statut ?? "present" }
-    if (notes !== undefined) map["Notes"] = notes
+    const map: Record<string, unknown> = { "ETAT": statut ?? "present" }
+    if (notes !== undefined) map["Commentaire"] = notes
     await updateRowById(sheets, "ASSIDUITE", String(existing["ID"]), map)
     return { ok: true, action: "updated", ID_Assiduite: String(existing["ID"]) }
   }
@@ -475,12 +610,109 @@ async function upsertAssiduite(
   const id = await nextId(sheets, "ASSIDUITE")
   await appendRow(sheets, "ASSIDUITE", {
     "ID": id,
-    "ID_Evenement": idEvenement,
-    "ID_Personne": idPersonne,
-    "Statut": statut ?? "present",
-    "Notes": notes ?? "",
+    "Evenement ID": idEvenement,
+    "Personne ID": idPersonne,
+    "ETAT": statut ?? "present",
+    "Commentaire": notes ?? "",
   })
   return { ok: true, action: "created", ID_Assiduite: String(id) }
+}
+
+// ── ÉCRITURE ATELIERS ─────────────────────────────────────
+
+function joinList(v: unknown, sep: string): string {
+  if (Array.isArray(v)) return v.join(sep)
+  return v === undefined || v === null ? "" : String(v)
+}
+
+/** Convertit "2026-02-16" (ISO, format du champ <input date>) en "16/02/2026" (FR)
+ *  pour un affichage lisible dans le Google Sheet. Laisse la valeur inchangée sinon. */
+function isoToFr(v: unknown): string {
+  const s = String(v ?? "")
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : s
+}
+
+/** Remplace les liens (bénéficiaires / intervenants) d'un atelier : on supprime
+ *  les lignes existantes de l'atelier puis on ré-insère la nouvelle liste.
+ *  `undefined` = on ne touche pas à ce type de lien. */
+async function syncAtelierLiens(
+  sheets: Sheets,
+  idAtelier: string | number,
+  beneficiaireIds?: (string | number)[],
+  intervenantIds?: (string | number)[],
+) {
+  if (beneficiaireIds !== undefined) {
+    await deleteRowsWhere(sheets, "ATELIER_BENEFICIAIRE", "Atelier ID", [String(idAtelier)])
+    for (const pid of beneficiaireIds) {
+      const bid = await nextId(sheets, "ATELIER_BENEFICIAIRE")
+      await appendRow(sheets, "ATELIER_BENEFICIAIRE", { "ID": bid, "Atelier ID": idAtelier, "Personne ID": pid })
+    }
+  }
+  if (intervenantIds !== undefined) {
+    await deleteRowsWhere(sheets, "ATELIER_INTERVENANT", "Atelier ID", [String(idAtelier)])
+    for (const iid of intervenantIds) {
+      const rid = await nextId(sheets, "ATELIER_INTERVENANT")
+      await appendRow(sheets, "ATELIER_INTERVENANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Heures": "", "Role": "" })
+    }
+  }
+}
+
+function atelierRow(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    "Categorie": data.Categorie ?? "",
+    "Groupe": data.Groupe ?? "",
+    "Titre": data.Titre ?? "",
+    "Audience": data.Audience ?? "",
+    "Date debut": isoToFr(data.Date_Debut),
+    "Date fin": isoToFr(data.Date_Fin),
+    "Periode": data.Periode ?? "",
+    "Heure debut": data.Heure_Debut ?? "",
+    "Heure fin": data.Heure_Fin ?? "",
+    "Salle": data.Salle ?? "",
+    "Mode groupage": data.Mode_Groupage ?? "",
+    "Taille cible": data.Taille_Cible ?? "",
+    "Ratio encadrement": data.Ratio_Encadrement ?? "",
+    "Competences ciblees": joinList(data.Competences_Ciblees, ","),
+    "Taches": joinList(data.Taches, "\n"),
+    "Besoins": joinList(data.Besoins, "\n"),
+    "Etapes": joinList(data.Etapes, "\n"),
+    "Statut": data.Statut ?? "planifié",
+  }
+}
+
+async function addAtelier(
+  sheets: Sheets,
+  data: Record<string, unknown>,
+  beneficiaireIds?: (string | number)[],
+  intervenantIds?: (string | number)[],
+) {
+  const id = await nextId(sheets, "ATELIER")
+  await appendRow(sheets, "ATELIER", { "ID": id, ...atelierRow(data) })
+  await syncAtelierLiens(sheets, id, beneficiaireIds ?? [], intervenantIds ?? [])
+  return { ok: true, ID_Atelier: String(id) }
+}
+
+async function updateAtelier(
+  sheets: Sheets,
+  idAtelier: string,
+  data: Record<string, unknown>,
+  beneficiaireIds?: (string | number)[],
+  intervenantIds?: (string | number)[],
+) {
+  const updated = await updateRowById(sheets, "ATELIER", idAtelier, atelierRow(data))
+  if (!updated) return { error: "Atelier introuvable" }
+  await syncAtelierLiens(sheets, idAtelier, beneficiaireIds, intervenantIds)
+  return { ok: true }
+}
+
+async function deleteAtelier(sheets: Sheets, idAtelier: string) {
+  await Promise.all([
+    deleteRowsWhere(sheets, "ATELIER_BENEFICIAIRE", "Atelier ID", [String(idAtelier)]),
+    deleteRowsWhere(sheets, "ATELIER_INTERVENANT", "Atelier ID", [String(idAtelier)]),
+  ])
+  const deleted = await deleteRowById(sheets, "ATELIER", idAtelier)
+  return deleted ? { ok: true } : { error: "Atelier introuvable" }
 }
 
 // ── Helpers mapping ───────────────────────────────────────
