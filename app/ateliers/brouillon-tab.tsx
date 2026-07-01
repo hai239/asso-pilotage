@@ -19,7 +19,7 @@ import {
   type OptionsComposition,
   type Pondaration,
 } from "@/lib/group-composer"
-import SlideOver, { Field, Input, SaveButton } from "@/components/SlideOver"
+import SlideOver, { Field, Input, SaveButton, DeleteButton } from "@/components/SlideOver"
 import {
   Shuffle, RotateCcw, CheckCircle2, AlertTriangle, Users,
   GraduationCap, UserCheck, Sparkles, Settings, X, Plus,
@@ -41,7 +41,6 @@ interface Session extends FicheAtelier {
   heure: string
   duree: string
   salle: string
-  formatrice: string
   beneficiaireIds: number[]
   benevoleIds: number[]
   statut: SessionStatut
@@ -151,6 +150,10 @@ export default function BrouillonGroupesTab(props: {
   // Drag & drop
   const dragRef = useRef<{ benefId: number; fromGroupeId: string; atelierId: number } | null>(null)
 
+  // SlideOver "détails du groupe" — ouverte au clic sur une carte de groupe.
+  const [groupeSlide, setGroupeSlide] = useState(false)
+  const [viewingGroupe, setViewingGroupe] = useState<{ atelierId: number; groupeId: string } | null>(null)
+
   // Chargement des brouillons existants pour chaque session
   useEffect(() => {
     const map: Record<number, Brouillon | null> = {}
@@ -251,6 +254,22 @@ export default function BrouillonGroupesTab(props: {
   function supprimerBrouillon(atelierId: number) {
     deleteBrouillon(atelierId)
     setBrouillons(m => ({ ...m, [atelierId]: null }))
+  }
+
+  function ouvrirGroupe(atelierId: number, groupeId: string) {
+    setViewingGroupe({ atelierId, groupeId })
+    setGroupeSlide(true)
+  }
+
+  /** Supprime uniquement ce groupe du brouillon — ses membres redeviennent
+   *  "libres" (ils ne sont plus comptés dans aucun groupe). */
+  function supprimerGroupe(atelierId: number, groupeId: string) {
+    const b = brouillons[atelierId]
+    if (!b) return
+    const updated: Brouillon = { ...b, groupes: b.groupes.filter(g => g.id !== groupeId) }
+    saveBrouillon(updated)
+    setBrouillons(m => ({ ...m, [atelierId]: updated }))
+    setGroupeSlide(false)
   }
 
   function validerComposition(atelier: Session, brouillon: Brouillon) {
@@ -443,6 +462,7 @@ export default function BrouillonGroupesTab(props: {
                       onDrop={onDropOnGroupe}
                       onRemoveMember={benefId => removeMember(atelier.id, g.id, benefId)}
                       onAddMember={benefId => addMember(atelier.id, g.id, benefId)}
+                      onOpen={() => ouvrirGroupe(atelier.id, g.id)}
                       benefsLibres={getBenefsLibres(brouillon)}
                     />
                   ))}
@@ -625,6 +645,87 @@ export default function BrouillonGroupesTab(props: {
           <SaveButton />
         </form>
       </SlideOver>
+
+      {/* ── SlideOver détails du groupe (clic sur une carte) ── */}
+      {(() => {
+        const atelier   = viewingGroupe ? sessions.find(s => s.id === viewingGroupe.atelierId) : undefined
+        const brouillon = viewingGroupe ? brouillons[viewingGroupe.atelierId] : undefined
+        const groupe    = brouillon?.groupes.find(g => g.id === viewingGroupe?.groupeId)
+        const isParents = atelier?.audience === "parents"
+        return (
+          <SlideOver
+            open={groupeSlide}
+            onClose={() => setGroupeSlide(false)}
+            title={groupe?.nom ?? "Groupe"}
+            subtitle={atelier?.titre}
+            width="md"
+          >
+            {atelier && brouillon && groupe && viewingGroupe && (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">
+                    {isParents ? "Parents" : "Élèves"} du groupe ({groupe.beneficiaireIds.length})
+                  </p>
+                  {groupe.beneficiaireIds.length === 0 ? (
+                    <p className="text-sm text-muted italic">Aucun membre dans ce groupe.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {groupe.beneficiaireIds.map(id => {
+                        const b = benefById(id)
+                        if (!b) return null
+                        return (
+                          <li key={id} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-border">
+                            <span className="text-sm font-medium text-foreground">{b.prenom} {b.nom}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeMember(viewingGroupe.atelierId, viewingGroupe.groupeId, id)}
+                              className="p-1 rounded text-red-600 hover:bg-red-50"
+                              aria-label={`Retirer ${b.prenom} ${b.nom} du groupe`}
+                            >
+                              <X size={13} />
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">
+                    Ajouter {isParents ? "un parent" : "un élève"}
+                  </p>
+                  {getBenefsLibres(brouillon).length === 0 ? (
+                    <p className="text-sm text-muted italic">Aucun bénéficiaire libre à ajouter.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+                      {getBenefsLibres(brouillon).map(b => (
+                        <li key={b.id}>
+                          <button
+                            type="button"
+                            onClick={() => addMember(viewingGroupe.atelierId, viewingGroupe.groupeId, b.id)}
+                            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg hover:bg-slate-50"
+                          >
+                            <Plus size={12} className="text-muted" />
+                            <span className="font-medium text-foreground">{b.prenom} {b.nom}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-border">
+                  <DeleteButton
+                    label="Supprimer ce groupe"
+                    onClick={() => supprimerGroupe(viewingGroupe.atelierId, viewingGroupe.groupeId)}
+                  />
+                </div>
+              </div>
+            )}
+          </SlideOver>
+        )
+      })()}
     </div>
   )
 }
@@ -649,10 +750,12 @@ function GroupeCard(props: {
   onAddMember: (benefId: number) => void
   /** Bénéficiaires actifs non placés ailleurs (pool dans la popover). */
   benefsLibres: Beneficiaire[]
+  /** Ouvre la vue détaillée du groupe (clic sur l'en-tête de la carte). */
+  onOpen: () => void
 }) {
   const {
     groupe, atelierId, audience, dims, benefById, onDragStart, onDrop,
-    onRemoveMember, onAddMember, benefsLibres,
+    onRemoveMember, onAddMember, benefsLibres, onOpen,
   } = props
   const [over, setOver] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -672,7 +775,11 @@ function GroupeCard(props: {
         over ? "border-ateliers ring-2 ring-ateliers/20" : "border-border"
       }`}
     >
-      <header className="px-3 py-2 border-b border-border flex items-center justify-between gap-2 flex-wrap">
+      <header
+        onClick={onOpen}
+        className="px-3 py-2 border-b border-border flex items-center justify-between gap-2 flex-wrap cursor-pointer hover:bg-slate-50"
+        title="Voir le détail du groupe"
+      >
         <div className="min-w-0">
           <p className="text-xs font-semibold text-foreground truncate">{groupe.nom}</p>
           <p className="text-[10px] text-muted">{groupe.beneficiaireIds.length} bénéficiaire{groupe.beneficiaireIds.length > 1 ? "s" : ""}</p>

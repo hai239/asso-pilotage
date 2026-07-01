@@ -57,7 +57,6 @@ interface Session extends FicheAtelier {
   heure: string
   duree: string
   salle: string
-  formatrice: string
   beneficiaireIds: number[]
   benevoleIds: number[]
   intervenantIds: number[] // animateurs (table INTERVENANT)
@@ -162,7 +161,6 @@ function atelierFromSheet(a: AtelierSheet): Session {
     heure: a.Heure_Debut || "",
     duree: "",
     salle: a.Salle || "",
-    formatrice: "",
     beneficiaireIds: a.beneficiaireIds.map(Number).filter(n => !isNaN(n)),
     benevoleIds: [],
     intervenantIds: a.intervenants.map(i => Number(i.ID_Intervenant)).filter(n => !isNaN(n)),
@@ -808,7 +806,7 @@ function EditableList(props: {
 const emptySession = (): Omit<Session, "id"> => ({
   categorie: "", groupe: "",
   titre: "", description: "", date: new Date().toISOString().split("T")[0], dateFin: "",
-  heure: "14h00", duree: "2h", salle: "", formatrice: "",
+  heure: "14h00", duree: "2h", salle: "",
   beneficiaireIds: [], benevoleIds: [], intervenantIds: [], statut: "planifié",
   ...emptyFiche(),
 })
@@ -833,14 +831,10 @@ function AteliersTab({
 }) {
   // ── Filtres + recherche ──
   const [search, setSearch]            = useState("")
-  const [filterFormatrice, setFilterFormatrice] = useState<string>("tous")
   const [filterBenevole, setFilterBenevole]     = useState<string>("tous")
   const [filterDate, setFilterDate]    = useState<"tous" | "semaine" | "mois" | "moisProchain">("tous")
 
-  // Options déduites des données : formatrices uniques + bénévoles uniques.
-  const formatricesUniques = Array.from(new Set(
-    sessions.map(s => s.formatrice).filter(f => f.trim().length > 0),
-  )).sort((a, b) => a.localeCompare(b))
+  // Options déduites des données : bénévoles uniques.
   const benevolesPresents = Array.from(new Set(
     sessions.flatMap(s => s.benevoleIds),
   ))
@@ -869,7 +863,6 @@ function AteliersTab({
   const q = search.trim().toLowerCase()
   const matches = (s: Session) => {
     if (q && !s.titre.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q)) return false
-    if (filterFormatrice !== "tous" && s.formatrice !== filterFormatrice) return false
     if (filterBenevole !== "tous" && !s.benevoleIds.includes(Number(filterBenevole))) return false
     if (!matchDate(new Date(s.date))) return false
     return true
@@ -881,9 +874,9 @@ function AteliersTab({
   const upcoming = sorted.filter(s => s.statut !== "terminé" && s.statut !== "annulé")
   const past     = sorted.filter(s => s.statut === "terminé" || s.statut === "annulé")
 
-  const filtreActif = q !== "" || filterFormatrice !== "tous" || filterBenevole !== "tous" || filterDate !== "tous"
+  const filtreActif = q !== "" || filterBenevole !== "tous" || filterDate !== "tous"
   function resetFiltres() {
-    setSearch(""); setFilterFormatrice("tous"); setFilterBenevole("tous"); setFilterDate("tous")
+    setSearch(""); setFilterBenevole("tous"); setFilterDate("tous")
   }
 
   // État "groupes dépliés" géré au niveau du parent pour ne pas se perdre
@@ -956,7 +949,6 @@ function AteliersTab({
           <div className="flex items-center gap-3 mt-1.5 flex-wrap text-xs text-muted">
             <span>⏱ {s.duree}</span>
             {s.salle     && <span>📍 {s.salle}</span>}
-            {s.formatrice && <span>👩‍🏫 {s.formatrice}</span>}
             {s.periode && (
               <span className={`${chipText} font-medium flex items-center gap-1`}>
                 <CalendarDays size={10} /> {s.periode}
@@ -1088,16 +1080,6 @@ function AteliersTab({
           )}
         </div>
         <select
-          value={filterFormatrice}
-          onChange={e => setFilterFormatrice(e.target.value)}
-          className="text-sm rounded-xl border border-border bg-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ateliers/30"
-        >
-          <option value="tous">Toutes les formatrices</option>
-          {formatricesUniques.map(f => (
-            <option key={f} value={f}>{f}</option>
-          ))}
-        </select>
-        <select
           value={filterBenevole}
           onChange={e => setFilterBenevole(e.target.value)}
           className="text-sm rounded-xl border border-border bg-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ateliers/30"
@@ -1171,11 +1153,12 @@ function AteliersTab({
 // (Categorie). Cliquer sur un groupe ouvre l'atelier correspondant.
 // ══════════════════════════════════════════════
 function GroupesTab({
-  sessions, beneficiaires, onEdit,
+  sessions, beneficiaires, onEdit, onView,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
   onEdit: (s: Session) => void
+  onView: (s: Session) => void
 }) {
   const [search, setSearch] = useState("")
 
@@ -1270,7 +1253,7 @@ function GroupesTab({
                     return (
                       <li
                         key={s.id}
-                        onClick={() => onEdit(s)}
+                        onClick={() => onView(s)}
                         className="px-4 py-3 flex items-center gap-4 hover:bg-white/60 cursor-pointer group/row"
                       >
                         <div className="flex-1 min-w-0">
@@ -1368,6 +1351,9 @@ export default function AteliersPage() {
   const [sessionForm, setSessionForm]   = useState<Omit<Session, "id">>(emptySession())
   const [detailSlide, setDetailSlide]   = useState(false)
   const [viewingSession, setViewingSession] = useState<Session | null>(null)
+  /** Brouillon des membres édité depuis la vue « Détails » (onglet Groupes) —
+   *  permet d'ajouter/retirer des élèves sans passer par le formulaire complet. */
+  const [groupMembersDraft, setGroupMembersDraft] = useState<number[]>([])
 
   // ── Groupes ──
   const [groupes, setGroupes]           = useState<Groupe[]>(ateliersMock.groupes as Groupe[])
@@ -1450,8 +1436,31 @@ export default function AteliersPage() {
     setSessionSlide(true)
   }
   function openViewSession(s: Session) {
+    refreshMembres()
     setViewingSession(s)
+    setGroupMembersDraft([...s.beneficiaireIds])
     setDetailSlide(true)
+  }
+  function toggleGroupMember(id: number) {
+    setGroupMembersDraft(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+  }
+  /** Enregistre le brouillon de membres édité depuis la vue « Détails » —
+   *  ré-utilise atelierPayload pour ne pas écraser les autres champs de l'atelier. */
+  async function handleUpdateGroupMembers() {
+    if (!viewingSession) return
+    const payload = atelierPayload({ ...viewingSession, beneficiaireIds: groupMembersDraft })
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateAtelier", idAtelier: String(viewingSession.id), ...payload }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await reloadAteliers()
+      setViewingSession(v => v ? { ...v, beneficiaireIds: [...groupMembersDraft] } : v)
+      setToast({ message: "Membres du groupe mis à jour dans le Sheet." })
+    } catch {
+      setToast({ message: "Erreur : la mise à jour des membres a échoué." })
+    }
   }
   /** Construit le payload d'écriture ATELIER (colonnes du Sheet) depuis le formulaire. */
   function atelierPayload(f: Omit<Session, "id">) {
@@ -1721,6 +1730,7 @@ export default function AteliersPage() {
             sessions={sessionsForAudience}
             beneficiaires={beneficiaires}
             onEdit={openEditSession}
+            onView={openViewSession}
           />
         )
       )}
@@ -1781,9 +1791,6 @@ export default function AteliersPage() {
       >
         {viewingSession && (() => {
           const s = viewingSession
-          const benefs = s.beneficiaireIds
-            .map(id => beneficiaires.find(b => b.id === id))
-            .filter((b): b is Beneficiaire => Boolean(b))
           const bvls = s.benevoleIds
             .map(id => benevoles.find(bv => bv.id === id))
             .filter((bv): bv is (typeof benevoles)[0] => Boolean(bv))
@@ -1830,10 +1837,6 @@ export default function AteliersPage() {
                 <div>
                   <p className="text-[11px] text-muted">Salle</p>
                   <p className="text-foreground">{s.salle || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-muted">Formatrice</p>
-                  <p className="text-foreground">{s.formatrice || "—"}</p>
                 </div>
                 {s.periode && (
                   <div className="col-span-2">
@@ -1889,18 +1892,22 @@ export default function AteliersPage() {
               )}
 
               <div>
-                <p className="text-[11px] text-muted mb-1.5">Bénéficiaires ({benefs.length})</p>
-                {benefs.length === 0 ? (
-                  <p className="text-sm text-muted italic">Aucun bénéficiaire rattaché.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {benefs.map(b => (
-                      <span key={b.id} className="text-[11px] bg-ateliers-light text-ateliers-dark px-2 py-0.5 rounded-full">
-                        {b.prenom} {b.nom}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <p className="text-[11px] text-muted mb-1.5">
+                  {s.audience === "parents" ? "Parents" : "Élèves"} du groupe ({groupMembersDraft.length})
+                </p>
+                <SelecteurBeneficiaires
+                  options={beneficiaires.filter(b => b.type === (s.audience === "parents" ? "parent" : "eleve"))}
+                  selectedIds={groupMembersDraft}
+                  onToggle={toggleGroupMember}
+                  placeholder={s.audience === "parents" ? "Sélectionner des parents…" : "Sélectionner des élèves…"}
+                />
+                <button
+                  type="button"
+                  onClick={handleUpdateGroupMembers}
+                  className="mt-2 w-full text-xs font-medium bg-ateliers-light text-ateliers-dark py-2 rounded-lg hover:bg-ateliers/20 transition-colors"
+                >
+                  Enregistrer les membres
+                </button>
               </div>
 
               <div>
@@ -2050,13 +2057,6 @@ export default function AteliersPage() {
             </Field>
           </FormRow>
           <FormRow>
-            <Field label="Formatrice">
-              <Input
-                placeholder="Somayeh"
-                value={sessionForm.formatrice}
-                onChange={e => setSessionForm(f => ({ ...f, formatrice: e.target.value }))}
-              />
-            </Field>
             <Field label="Statut">
               <Select
                 value={sessionForm.statut}
@@ -2068,16 +2068,15 @@ export default function AteliersPage() {
                 <option>annulé</option>
               </Select>
             </Field>
+            {/* ── Période concernée (champ libre) ── */}
+            <Field label="Période concernée">
+              <Input
+                placeholder="Ex : Vacances de printemps 2026"
+                value={sessionForm.periode}
+                onChange={e => setSessionForm(f => ({ ...f, periode: e.target.value }))}
+              />
+            </Field>
           </FormRow>
-
-          {/* ── Période concernée (champ libre) ── */}
-          <Field label="Période concernée">
-            <Input
-              placeholder="Ex : Vacances de printemps 2026"
-              value={sessionForm.periode}
-              onChange={e => setSessionForm(f => ({ ...f, periode: e.target.value }))}
-            />
-          </Field>
 
           {/* ── Couleur de l'atelier (Lot E — vue Groupes) ── */}
           <Field label="Couleur de l'atelier">
