@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getServerUser } from "@/lib/supabase/server"
 
 const GEMINI_MODEL = "gemini-2.5-flash"
 
@@ -20,6 +21,9 @@ const RESPONSE_SCHEMA = {
 }
 
 export async function POST(request: NextRequest) {
+  if (!(await getServerUser())) {
+    return NextResponse.json({ error: "Non authentifié." }, { status: 401 })
+  }
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
     return NextResponse.json({ error: "GEMINI_API_KEY non configurée" }, { status: 500 })
