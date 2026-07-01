@@ -293,13 +293,13 @@ async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: s
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
   return rows
     .filter((r) => {
-      const matchE = !idEvenement || String(r["Evenement ID"]) === String(idEvenement)
+      const matchE = !idEvenement || String(r["Evenement2 ID"]) === String(idEvenement)
       const matchP = !idPersonne  || String(r["Personne ID"])  === String(idPersonne)
       return matchE && matchP
     })
     .map((r) => ({
       ID_Assiduite: String(r["ID"]),
-      ID_Evenement: String(r["Evenement ID"]),
+      ID_Evenement: String(r["Evenement2 ID"]),
       ID_Personne:  String(r["Personne ID"]),
       Statut: r["ETAT"] ?? "present",
       Notes: r["Commentaire"] ?? "",
@@ -667,7 +667,7 @@ async function addAssiduite(sheets: Sheets, data: Record<string, unknown>) {
   const id = await nextId(sheets, "ASSIDUITE")
   await appendRow(sheets, "ASSIDUITE", {
     "ID": id,
-    "Evenement ID": data.ID_Evenement ?? "",
+    "Evenement2 ID": data.ID_Evenement ?? "",
     "Personne ID": data.ID_Personne ?? "",
     "ETAT": data.Statut ?? "present",
     "Commentaire": data.Notes ?? "",
@@ -698,7 +698,7 @@ async function upsertAssiduite(
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
   const existing = rows.find(
     (r) =>
-      String(r["Evenement ID"]) === String(idEvenement) &&
+      String(r["Evenement2 ID"]) === String(idEvenement) &&
       String(r["Personne ID"]) === String(idPersonne)
   )
 
@@ -712,7 +712,7 @@ async function upsertAssiduite(
   const id = await nextId(sheets, "ASSIDUITE")
   await appendRow(sheets, "ASSIDUITE", {
     "ID": id,
-    "Evenement ID": idEvenement,
+    "Evenement2 ID": idEvenement,
     "Personne ID": idPersonne,
     "ETAT": statut ?? "present",
     "Commentaire": notes ?? "",
