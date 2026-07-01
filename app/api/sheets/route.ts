@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
   sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, nextId, fmtDate, parseDateFr, ensureColumn,
@@ -19,6 +20,7 @@ function err(message: string, status = 400) {
 // ── GET ───────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  if (!(await getServerUser())) return err("Non authentifié.", 401)
   const { searchParams } = new URL(request.url)
   const action = searchParams.get("action") ?? "ping"
   const sheets = getSheetsClient()
@@ -53,6 +55,7 @@ export async function GET(request: NextRequest) {
 // ── POST ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  if (!(await getServerUser())) return err("Non authentifié.", 401)
   const body = await request.json()
   const { action } = body
   const sheets = getSheetsClient()

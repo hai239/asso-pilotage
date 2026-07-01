@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { NextResponse } from "next/server"
+import { getServerUser } from "@/lib/supabase/server"
 
 // POST /api/generate-post
 // Génère le contenu d'un post réseaux sociaux via Claude
@@ -67,6 +68,9 @@ JSON UNIQUEMENT, sans markdown : ${schema}`
 }
 
 export async function POST(request: Request) {
+  if (!(await getServerUser())) {
+    return NextResponse.json({ error: "Non authentifié." }, { status: 401 })
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey || apiKey.startsWith("sk-ant-VOTRE")) {
     return NextResponse.json(
