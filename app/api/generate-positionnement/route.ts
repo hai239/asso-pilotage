@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getServerUser } from "@/lib/supabase/server"
 import { getNiveau, type NiveauKey } from "@/lib/positionnement-data"
 import {
   getSheetsClient,
@@ -305,6 +306,9 @@ async function synthesizeAudioBase64(apiKey: string, text: string): Promise<stri
 }
 
 export async function POST(request: Request) {
+  if (!(await getServerUser())) {
+    return NextResponse.json({ error: "Non authentifié." }, { status: 401 })
+  }
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey || apiKey.startsWith("VOTRE")) {
     return NextResponse.json(
