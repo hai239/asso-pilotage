@@ -223,6 +223,7 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
     { label: "Genre", value: String(membre.Genre || "") },
     { label: "Pays d'origine", value: String(membre.Pays_Origine || "") },
     { label: "Langue maternelle", value: String(membre.Langue_Maternelle || "") },
+    { label: "Nb. enfants accompagnants", value: membre.Nb_Enfants ? String(membre.Nb_Enfants) : "" },
     { label: "Adresse", value: String(famille?.Adresse_Complete || famille?.Adresse || "") },
     { label: "Contact principal", value: membre.Contact_Principal ? String(membre.Contact_Principal) : "" },
     { label: "Source d'orientation", value: String(membre.Source_Orientation || "") },
