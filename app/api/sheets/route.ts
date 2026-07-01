@@ -227,9 +227,11 @@ async function getAteliers(sheets: Sheets, audience?: string) {
     .filter((a) => !audience || String(a["Audience"]).toLowerCase() === audience.toLowerCase())
     .map((a) => {
       const id = String(a["ID"])
-      const beneficiaireIds = benefLinks
-        .filter((l) => String(l["Atelier ID"]) === id)
-        .map((l) => String(l["Personne ID"]))
+      const beneficiaireIds = Array.from(new Set(
+        benefLinks
+          .filter((l) => String(l["Atelier ID"]) === id)
+          .map((l) => String(l["Personne ID"]))
+      ))
       const intervenants = intervLinks
         .filter((l) => String(l["Atelier ID"]) === id)
         .map((l) => ({
