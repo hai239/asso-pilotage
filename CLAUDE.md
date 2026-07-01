@@ -107,8 +107,25 @@ import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteB
 import { useAuth } from "@/lib/auth-context"
 const { user, logout } = useAuth()
 // user : AuthUser | null  →  { id, email, nom, prenom, role, createdAt }
-// role : "admin" | "formatrice" | "coordinatrice" | "benevole"
+// role : "super_admin" | "admin" | "formatrice" | "coordinatrice" | "benevole"
 ```
+L'authentification passe par **Supabase** (voir `docs/explanation/adr/007-auth-supabase.md`).
+
+### ⚠️ Règle — TOUTES les URLs passent par l'authentification
+Toute route de l'application (l'espace « dashboard » et tous ses modules) **exige une
+session authentifiée**. Une URL n'est accessible sans connexion que si elle figure
+explicitement dans les **exceptions publiques** :
+- `/login`
+- les pages légales : `/mentions-legales`, `/confidentialite`, `/accessibilite`
+  (liste `LEGAL_PATHS` dans `components/AuthGate.tsx`)
+
+Concrètement :
+- **Pages** : `components/AuthGate.tsx` redirige tout·e visiteur·se non authentifié·e vers
+  `/login` (sauf exceptions ci-dessus). Toute nouvelle page fait donc partie du périmètre
+  protégé par défaut — ne l'ajoute JAMAIS à `LEGAL_PATHS`/exceptions sans décision explicite.
+- **Routes API** (`app/api/*`) : chaque handler doit commencer par la garde serveur
+  `if (!(await getServerUser())) return 401` (`lib/supabase/server.ts`). Toute nouvelle
+  route API exposant des données ou appelant un service tiers DOIT être gardée.
 
 ### "use client" — règle
 Toutes les pages sont `"use client"` (localStorage, état, hooks).
