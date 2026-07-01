@@ -32,7 +32,7 @@ const modules: ModuleCard[] = [
   { href: "/ateliers",      label: "Ateliers",      sub: "Planning, groupes",              icon: BookOpen,       accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
   { href: "/positionnement", label: "Positionnement", sub: "Génération de tests",          icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/communication", label: "Communication", sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light", iconClass: "text-communication-dark" },
-  { href: "/membres",       label: "Membres",       sub: "Annuaire équipe",                icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
+  { href: "/membres",       label: "Équipe",        sub: "Annuaire de l'équipe",           icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
   { href: "/compte",        label: "Mon compte",    sub: "Profil, comptes",                icon: UserCircle,     accent: "bg-slate-100",          iconClass: "text-slate-700" },
 ]
 
