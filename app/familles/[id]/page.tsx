@@ -20,6 +20,18 @@ function parseDateOcr(s?: string): string {
   return `${y}-${m?.padStart(2, "0")}-${d?.padStart(2, "0")}`
 }
 
+function normaliserTelephone(tel?: string): string {
+  if (!tel) return ""
+  // Supprimer tout sauf les chiffres
+  const digits = tel.replace(/\D/g, "")
+  // Numéro français sans indicatif : s'assurer qu'il commence par 0
+  if (digits.length === 9 && !digits.startsWith("0")) return "0" + digits
+  if (digits.length === 10) return digits
+  // Indicatif +33 → remplacer par 0
+  if (digits.startsWith("33") && digits.length === 11) return "0" + digits.slice(2)
+  return digits
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -113,7 +125,7 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
         ...f,
         Nom:            String(data.nom     ?? f.Nom     ?? ""),
         Prenom:         String(data.prenom  ?? f.Prenom  ?? ""),
-        Telephone:      data.telephones?.[0] ?? f.Telephone ?? "",
+        Telephone:      normaliserTelephone(data.telephones?.[0]) || f.Telephone || "",
         Date_Naissance: parseDateOcr(data.date_naissance) || (f.Date_Naissance ?? ""),
       }))
       setOcrDone(true)
