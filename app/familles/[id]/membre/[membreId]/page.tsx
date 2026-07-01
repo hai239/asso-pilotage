@@ -31,11 +31,13 @@ const TYPES_DOCUMENT = [
 ]
 
 const niveauStyle: Record<string, string> = {
-  "Alpha":  "bg-slate-100 text-slate-600",
-  "A1-":    "bg-absences-light text-absences-dark",
-  "A1+":    "bg-absences-light text-absences-dark",
-  "A2-":    "bg-ateliers-light text-ateliers-dark",
-  "A2+/B1": "bg-finances-light text-finances-dark",
+  "CM1":          "bg-ateliers-light text-ateliers-dark",
+  "CE2":          "bg-ateliers-light text-ateliers-dark",
+  "6eme":         "bg-familles-light text-familles-dark",
+  "5eme":         "bg-familles-light text-familles-dark",
+  "4eme":         "bg-familles-light text-familles-dark",
+  "2nde":         "bg-finances-light text-finances-dark",
+  "Terminale CAP":"bg-finances-light text-finances-dark",
 }
 
 const statutStyle: Record<string, string> = {
@@ -47,8 +49,8 @@ const statutStyle: Record<string, string> = {
   "TERMINE":  "bg-slate-100 text-slate-600",
 }
 
-const NIVEAUX = ["Alpha", "A1-", "A1+", "A2-", "A2+/B1"]
-const TYPES_APPRENANT = ["Adulte", "Enfant"]
+const NIVEAUX = ["CM1", "CE2", "6eme", "5eme", "4eme", "2nde", "Terminale CAP"]
+const TYPES_APPRENANT = ["FLE", "Soutien scolaire"]
 
 /** Option supplémentaire si la valeur du Sheet ne figure pas dans la liste prédéfinie */
 function ExtraOption({ value, list }: { value: string; list: string[] }) {
@@ -659,8 +661,8 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <Select value={String(reinscForm.Type_Apprenant ?? "")} onChange={e => setReinscForm(f => ({ ...f, Type_Apprenant: e.target.value }))}>
                 <option value="">—</option>
                 <ExtraOption value={String(reinscForm.Type_Apprenant ?? "")} list={TYPES_APPRENANT} />
-                <option value="Adulte">Adulte</option>
-                <option value="Enfant">Enfant</option>
+                <option value="FLE">FLE</option>
+                <option value="Soutien scolaire">Soutien scolaire</option>
               </Select>
             </Field>
           </FormRow>
@@ -668,11 +670,13 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             <Select value={String(reinscForm.Niveau ?? "")} onChange={e => setReinscForm(f => ({ ...f, Niveau: e.target.value }))}>
               <option value="">—</option>
               <ExtraOption value={String(reinscForm.Niveau ?? "")} list={NIVEAUX} />
-              <option value="Alpha">Alpha</option>
-              <option value="A1-">A1-</option>
-              <option value="A1+">A1+</option>
-              <option value="A2-">A2-</option>
-              <option value="A2+/B1">A2+/B1</option>
+              <option value="CM1">CM1</option>
+              <option value="CE2">CE2</option>
+              <option value="6eme">6ème</option>
+              <option value="5eme">5ème</option>
+              <option value="4eme">4ème</option>
+              <option value="2nde">2nde</option>
+              <option value="Terminale CAP">Terminale CAP</option>
             </Select>
           </Field>
           <Field label="Disponibilités">
@@ -761,8 +765,8 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <Select value={inscForm.Type_Apprenant} onChange={e => setInscForm(f => ({ ...f, Type_Apprenant: e.target.value }))}>
                 <option value="">—</option>
                 <ExtraOption value={inscForm.Type_Apprenant} list={TYPES_APPRENANT} />
-                <option value="Adulte">Adulte</option>
-                <option value="Enfant">Enfant</option>
+                <option value="FLE">FLE</option>
+                <option value="Soutien scolaire">Soutien scolaire</option>
               </Select>
             </Field>
           </FormRow>
@@ -770,11 +774,13 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             <Select value={inscForm.Niveau} onChange={e => setInscForm(f => ({ ...f, Niveau: e.target.value }))}>
               <option value="">—</option>
               <ExtraOption value={inscForm.Niveau} list={NIVEAUX} />
-              <option value="Alpha">Alpha</option>
-              <option value="A1-">A1-</option>
-              <option value="A1+">A1+</option>
-              <option value="A2-">A2-</option>
-              <option value="A2+/B1">A2+/B1</option>
+              <option value="CM1">CM1</option>
+              <option value="CE2">CE2</option>
+              <option value="6eme">6ème</option>
+              <option value="5eme">5ème</option>
+              <option value="4eme">4ème</option>
+              <option value="2nde">2nde</option>
+              <option value="Terminale CAP">Terminale CAP</option>
             </Select>
           </Field>
           <Field label="Disponibilités">
@@ -844,14 +850,17 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             <Input placeholder="JJ/MM/AAAA" value={String(form.Date_Naissance ?? "")} onChange={e => setForm(f => ({ ...f, Date_Naissance: e.target.value }))} />
           </Field>
           <FormRow>
-            <Field label="Niveau">
+            <Field label="Niveau / Classe">
               <Select value={String(form.Niveau ?? "")} onChange={e => setForm(f => ({ ...f, Niveau: e.target.value }))}>
                 <option value="">—</option>
-                <option value="Alpha">Alpha</option>
-                <option value="A1-">A1-</option>
-                <option value="A1+">A1+</option>
-                <option value="A2-">A2-</option>
-                <option value="A2+/B1">A2+/B1</option>
+                <ExtraOption value={String(form.Niveau ?? "")} list={NIVEAUX} />
+                <option value="CM1">CM1</option>
+                <option value="CE2">CE2</option>
+                <option value="6eme">6ème</option>
+                <option value="5eme">5ème</option>
+                <option value="4eme">4ème</option>
+                <option value="2nde">2nde</option>
+                <option value="Terminale CAP">Terminale CAP</option>
               </Select>
             </Field>
             <Field label="Statut">

@@ -262,14 +262,23 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
           <Field label="Langue maternelle">
             <Input value={String(membreForm.Langue_Maternelle ?? "")} onChange={e => setMembreForm(f => ({ ...f, Langue_Maternelle: e.target.value }))} />
           </Field>
-          <Field label="Niveau">
+          <Field label="Type d'apprenant">
+            <Select value={String(membreForm.Type_Apprenant ?? "")} onChange={e => setMembreForm(f => ({ ...f, Type_Apprenant: e.target.value }))}>
+              <option value="">— Choisir —</option>
+              <option value="FLE">FLE</option>
+              <option value="Soutien scolaire">Soutien scolaire</option>
+            </Select>
+          </Field>
+          <Field label="Niveau / Classe (soutien scolaire uniquement)">
             <Select value={String(membreForm.Niveau ?? "")} onChange={e => setMembreForm(f => ({ ...f, Niveau: e.target.value }))}>
               <option value="">— Choisir —</option>
-              <option value="Alpha">Alpha</option>
-              <option value="A1-">A1-</option>
-              <option value="A1+">A1+</option>
-              <option value="A2-">A2-</option>
-              <option value="A2+/B1">A2+/B1</option>
+              <option value="CM1">CM1</option>
+              <option value="CE2">CE2</option>
+              <option value="6eme">6ème</option>
+              <option value="5eme">5ème</option>
+              <option value="4eme">4ème</option>
+              <option value="2nde">2nde</option>
+              <option value="Terminale CAP">Terminale CAP</option>
             </Select>
           </Field>
           <Field label="Statut">
