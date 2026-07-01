@@ -33,11 +33,10 @@ app/
 ├── communication/  Calendrier éditorial + kanban suivi posts + archive publiés
 ├── benevoles/      Disponibilités bénévoles + gestion événements
 ├── membres/        Annuaire membres (rôles, statuts, CRUD)
-├── familles/       Bénéficiaires — familles, parents, enfants ✅ NOUVEAU
-│   ├── page.tsx              Listing 3 onglets (Familles / Parents / Enfants)
-│   ├── [id]/page.tsx         Fiche famille + ajout membre
-│   └── [id]/membre/[membreId]/page.tsx  Fiche membre individuelle
-└── roadmap/        Matrice impact/facilité + suivi sous-actions
+└── familles/       Bénéficiaires — familles, parents, enfants ✅ NOUVEAU
+    ├── page.tsx              Listing 3 onglets (Familles / Parents / Enfants)
+    ├── [id]/page.tsx         Fiche famille + ajout membre
+    └── [id]/membre/[membreId]/page.tsx  Fiche membre individuelle
 
 components/
 ├── Sidebar.tsx     Navigation + chip utilisateur connecté
@@ -50,7 +49,6 @@ lib/
 ├── auth-context.tsx    Provider React + hook useAuth()
 ├── mock-data.ts        Données mockées (absences, finances, ateliers, com, bénévoles)
 ├── emargement-data.ts  Séances + présences initiales
-├── roadmap-data.ts     6 thèmes, 16 use cases, 43 sous-actions
 ├── sheets-api.ts       Couche client module Familles (fetch → /api/sheets)
 └── google-sheets-server.ts  Clients Sheets + Drive (compte de service, côté serveur)
 

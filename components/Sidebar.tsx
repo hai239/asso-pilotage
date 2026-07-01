@@ -8,7 +8,6 @@ import {
   BookOpen,
   Megaphone,
   Heart,
-  Map,
   ClipboardCheck,
   UserCircle,
   LogOut,
@@ -30,11 +29,6 @@ const navItems = [
   { href: "/positionnement", label: "Test de positionnement", icon: GraduationCap, accent: "bg-positionnement-light text-positionnement-dark", dot: "bg-positionnement" },
   { href: "/communication", label: "Communication",   icon: Megaphone,       accent: "bg-communication-light text-communication-dark", dot: "bg-communication" },
   { href: "/membres",       label: "Membres",         icon: UserCog,         accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
-]
-
-const stratItems = [
-  { href: "/roadmap", label: "Roadmap stratégique", icon: Map, accent: "bg-slate-100 text-slate-700", dot: "bg-slate-600" },
-  { href: "/docs", label: "Documentation", icon: BookOpen, accent: "bg-slate-100 text-slate-700", dot: "bg-slate-500", superAdminOnly: true },
 ]
 
 export default function Sidebar() {
@@ -60,26 +54,6 @@ export default function Sidebar() {
         <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-1.5 mt-1">Opérationnel</p>
         {navItems.map(({ href, label, icon: Icon, accent, dot }) => {
           const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href))
-          return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                active
-                  ? `${accent} font-semibold`
-                  : "text-muted hover:bg-slate-50 hover:text-foreground"
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${active ? dot : "bg-border"}`} />
-              <Icon size={16} className="shrink-0" />
-              {label}
-            </Link>
-          )
-        })}
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-1.5 mt-3">Stratégie</p>
-        {stratItems.filter(item => !item.superAdminOnly || user?.role === "super_admin").map(({ href, label, icon: Icon, accent, dot }) => {
-          const active = pathname.startsWith(href)
           return (
             <Link
               key={href}

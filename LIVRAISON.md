@@ -30,7 +30,6 @@ Il centralise :
 - Le suivi des financements
 - La communication sur les réseaux sociaux
 - La gestion des membres de l'équipe
-- La roadmap stratégique
 
 ### Stack technique
 
@@ -49,7 +48,7 @@ Il centralise :
 > **Important — où vivent les données :**
 > - **Authentification** : Supabase (comptes partagés, vérifiés côté serveur).
 > - **Familles & Assiduité** : Google Sheets `BDD_Asso_CRM` (données **partagées** entre tous les postes).
-> - **Autres modules** (dashboard, émargement, ateliers, finances, communication, membres, roadmap) : `localStorage` du navigateur → **propres à chaque poste**, pas encore synchronisés (voir section 7).
+> - **Autres modules** (dashboard, émargement, ateliers, finances, communication, membres) : `localStorage` du navigateur → **propres à chaque poste**, pas encore synchronisés (voir section 7).
 
 ---
 
@@ -105,10 +104,6 @@ Il centralise :
 ### Membres (`/membres`)
 - Annuaire de l'équipe (salariées, bénévoles, coordinatrices)
 - Rôles, statuts, gestion des candidatures, CRUD complet
-
-### Roadmap stratégique (`/roadmap`)
-- Matrice impact / facilité, vue par thème (6 thèmes, 16 use cases, 43 sous-actions)
-- Suivi d'avancement par sous-action (à faire / en cours / fait)
 
 ### Gestion de compte (`/compte`)
 - Modification de son profil (prénom, nom, email) et de son mot de passe
@@ -215,7 +210,7 @@ Voir section 3 (un compte par membre).
 
 ### Étape 5 — Saisir les données initiales
 - **Familles / Assiduité** : les données vivent dans Google Sheets (partagées) — pas de ressaisie par poste.
-- **Autres modules** (ateliers, finances, communication, membres, roadmap) : encore en `localStorage` → à saisir sur chaque poste tant que la migration n'est pas généralisée (voir section 7).
+- **Autres modules** (ateliers, finances, communication, membres) : encore en `localStorage` → à saisir sur chaque poste tant que la migration n'est pas généralisée (voir section 7).
 
 ### Étape 6 — Configurer l'intégration réseaux sociaux (optionnel)
 Voir section 6.
@@ -282,7 +277,7 @@ signature) pour pré-remplir le formulaire d'ajout de membre.
 
 | Limite | Impact | Piste |
 |---|---|---|
-| Modules hors Familles/Assiduité en `localStorage` | Pas de partage entre postes (ateliers, finances, communication, membres, roadmap) | Étendre le backend partagé (Sheets/Supabase) |
+| Modules hors Familles/Assiduité en `localStorage` | Pas de partage entre postes (ateliers, finances, communication, membres) | Étendre le backend partagé (Sheets/Supabase) |
 | Pas de notifications | Alertes visibles seulement à la connexion | Notifications (email / Realtime) |
 | Publication réseaux sociaux via Zapier | Dépendance service tiers | Publication directe |
 | Upload documents plafonné (~4,5 Mo) | Gros PDF refusés | Upload direct vers Drive/Storage |
@@ -321,7 +316,7 @@ signature) pour pré-remplir le formulaire d'ajout de membre.
 - Vérifier que `GEMINI_API_KEY` est bien configurée sur Vercel.
 
 **Données `localStorage` disparues** :
-- Les modules encore en `localStorage` (ateliers, finances, communication, membres, roadmap) sont propres au navigateur : un cache vidé = données perdues sur ce poste. Familles et Assiduité, elles, sont dans Google Sheets.
+- Les modules encore en `localStorage` (ateliers, finances, communication, membres) sont propres au navigateur : un cache vidé = données perdues sur ce poste. Familles et Assiduité, elles, sont dans Google Sheets.
 
 **Ajouter un·e utilisateur·rice** :
 - Seul·e un·e admin peut créer des comptes (page `/compte`).

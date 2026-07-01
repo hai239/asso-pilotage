@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Heart, LogOut, UserCircle,
-  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, Map, GraduationCap,
+  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, GraduationCap,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { ROLE_LABELS } from "@/lib/auth"
@@ -32,9 +32,7 @@ const modules: ModuleCard[] = [
   { href: "/positionnement", label: "Positionnement", sub: "Génération de tests",          icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/communication", label: "Communication", sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light", iconClass: "text-communication-dark" },
   { href: "/membres",       label: "Membres",       sub: "Annuaire équipe",                icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
-  { href: "/roadmap",       label: "Roadmap",       sub: "Impact / facilité",              icon: Map,            accent: "bg-slate-100",          iconClass: "text-slate-700" },
   { href: "/compte",        label: "Mon compte",    sub: "Profil, comptes",                icon: UserCircle,     accent: "bg-slate-100",          iconClass: "text-slate-700" },
-  { href: "/docs",          label: "Documentation", sub: "Guides, ADR",                    icon: BookOpen,       accent: "bg-slate-100",          iconClass: "text-slate-700", superAdminOnly: true },
 ]
 
 function todayFr() {
