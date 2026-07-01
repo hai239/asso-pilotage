@@ -309,10 +309,13 @@ async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: s
 // ── LECTURE ATELIERS ──────────────────────────────────────
 
 async function getAteliers(sheets: Sheets, audience?: string) {
-  const [ateliers, participants] = await Promise.all([
-    sheetToObjects(sheets, "ATELIER"),
+  const [evenements, participants] = await Promise.all([
+    sheetToObjects(sheets, "EVENEMENT2"),
     sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
   ])
+  // La table EVENEMENT2 est partagée avec d'autres types d'événements
+  // (cours, sortie…) — ce module ne gère que les lignes Type = "atelier".
+  const ateliers = evenements.filter((a) => String(a["Type"] ?? "").toLowerCase() === "atelier")
   return ateliers
     .filter((a) => !audience || String(a["Audience"]).toLowerCase() === audience.toLowerCase())
     .map((a) => {
@@ -759,6 +762,9 @@ async function syncAtelierLiens(
 
 function atelierRow(data: Record<string, unknown>): Record<string, unknown> {
   return {
+    // EVENEMENT2 est une table partagée (cours, sortie…) — ce module n'écrit
+    // et ne gère que des lignes "atelier".
+    "Type": "atelier",
     "Categorie": data.Categorie ?? "",
     "Groupe": data.Groupe ?? "",
     "Titre": data.Titre ?? "",
@@ -786,8 +792,8 @@ async function addAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
-  const id = await nextId(sheets, "ATELIER")
-  await appendRow(sheets, "ATELIER", { "ID": id, ...atelierRow(data) })
+  const id = await nextId(sheets, "EVENEMENT2")
+  await appendRow(sheets, "EVENEMENT2", { "ID": id, ...atelierRow(data) })
   await syncAtelierLiens(sheets, id, beneficiaireIds ?? [], intervenantIds ?? [])
   return { ok: true, ID_Atelier: String(id) }
 }
@@ -799,7 +805,7 @@ async function updateAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
-  const updated = await updateRowById(sheets, "ATELIER", idAtelier, atelierRow(data))
+  const updated = await updateRowById(sheets, "EVENEMENT2", idAtelier, atelierRow(data))
   if (!updated) return { error: "Atelier introuvable" }
   await syncAtelierLiens(sheets, idAtelier, beneficiaireIds, intervenantIds)
   return { ok: true }
@@ -807,7 +813,7 @@ async function updateAtelier(
 
 async function deleteAtelier(sheets: Sheets, idAtelier: string) {
   await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Atelier ID", [String(idAtelier)])
-  const deleted = await deleteRowById(sheets, "ATELIER", idAtelier)
+  const deleted = await deleteRowById(sheets, "EVENEMENT2", idAtelier)
   return deleted ? { ok: true } : { error: "Atelier introuvable" }
 }
 

@@ -30,7 +30,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
-  ChevronDown, ChevronRight, Search, GraduationCap,
+  ChevronDown, ChevronRight, Search, GraduationCap, Eye,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -822,13 +822,14 @@ const emptyGroupe = (): Omit<Groupe, "id"> => ({
 // ONGLET ATELIERS
 // ══════════════════════════════════════════════
 function AteliersTab({
-  sessions, beneficiaires, benevoles, groupes, onEdit,
+  sessions, beneficiaires, benevoles, groupes, onEdit, onView,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
   benevoles: typeof benevolesMock.liste
   groupes: Groupe[]
   onEdit: (s: Session) => void
+  onView: (s: Session) => void
 }) {
   // ── Filtres + recherche ──
   const [search, setSearch]            = useState("")
@@ -1051,7 +1052,10 @@ function AteliersTab({
               <ClipboardCheck size={11} /> Émarger
             </Link>
           )}
-          <button onClick={() => onEdit(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted">
+          <button onClick={() => onView(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted" aria-label="Voir les détails">
+            <Eye size={13} />
+          </button>
+          <button onClick={() => onEdit(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted" aria-label="Modifier">
             <Pencil size={13} />
           </button>
         </div>
@@ -1362,6 +1366,8 @@ export default function AteliersPage() {
   const [sessionSlide, setSessionSlide] = useState(false)
   const [editingSession, setEditingSession] = useState<Session | null>(null)
   const [sessionForm, setSessionForm]   = useState<Omit<Session, "id">>(emptySession())
+  const [detailSlide, setDetailSlide]   = useState(false)
+  const [viewingSession, setViewingSession] = useState<Session | null>(null)
 
   // ── Groupes ──
   const [groupes, setGroupes]           = useState<Groupe[]>(ateliersMock.groupes as Groupe[])
@@ -1438,9 +1444,14 @@ export default function AteliersPage() {
   }
   function openEditSession(s: Session) {
     refreshMembres()
+    setDetailSlide(false)
     setEditingSession(s)
     setSessionForm({ ...s, beneficiaireIds: [...s.beneficiaireIds], benevoleIds: [...s.benevoleIds] })
     setSessionSlide(true)
+  }
+  function openViewSession(s: Session) {
+    setViewingSession(s)
+    setDetailSlide(true)
   }
   /** Construit le payload d'écriture ATELIER (colonnes du Sheet) depuis le formulaire. */
   function atelierPayload(f: Omit<Session, "id">) {
@@ -1488,15 +1499,16 @@ export default function AteliersPage() {
       setToast({ message: "Erreur : l'enregistrement dans le Sheet a échoué." })
     }
   }
-  async function handleDeleteSession() {
-    if (!editingSession) return
+  async function handleDeleteAtelier(id: number) {
+    if (!confirm("Supprimer définitivement cet atelier ?")) return
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "deleteAtelier", idAtelier: String(editingSession.id) }),
+        body: JSON.stringify({ action: "deleteAtelier", idAtelier: String(id) }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setSessionSlide(false)
+      setDetailSlide(false)
       await reloadAteliers()
       setToast({ message: "Atelier supprimé du Sheet." })
     } catch {
@@ -1697,6 +1709,7 @@ export default function AteliersPage() {
             benevoles={benevoles}
             groupes={groupesForAudience}
             onEdit={openEditSession}
+            onView={openViewSession}
           />
         )
       )}
@@ -1756,6 +1769,195 @@ export default function AteliersPage() {
           }}
         />
       )}
+
+      {/* ════════════════════════════════════════
+          SLIDEOVER — Détails de l'atelier (lecture seule)
+      ════════════════════════════════════════ */}
+      <SlideOver
+        open={detailSlide}
+        onClose={() => setDetailSlide(false)}
+        title="Détails de l'atelier"
+        width="lg"
+      >
+        {viewingSession && (() => {
+          const s = viewingSession
+          const benefs = s.beneficiaireIds
+            .map(id => beneficiaires.find(b => b.id === id))
+            .filter((b): b is Beneficiaire => Boolean(b))
+          const bvls = s.benevoleIds
+            .map(id => benevoles.find(bv => bv.id === id))
+            .filter((bv): bv is (typeof benevoles)[0] => Boolean(bv))
+          const intervs = s.intervenantIds
+            .map(id => intervenants.find(iv => Number(iv.ID_Intervenant) === id))
+            .filter((iv): iv is IntervenantSheet => Boolean(iv))
+          const groupesAtelier = groupes.filter(g => g.atelierId === s.id)
+          return (
+            <div className="flex flex-col gap-5">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-semibold text-foreground">
+                    {s.titre || [s.categorie, s.groupe].filter(Boolean).join(" · ")}
+                  </h3>
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statutSessionStyle[s.statut]}`}>
+                    {s.statut}
+                  </span>
+                </div>
+                <p className="text-xs text-muted mt-0.5">
+                  {s.audience === "parents" ? "Parents" : "Élèves"} · {s.categorie}{s.groupe && ` · ${s.groupe}`}
+                </p>
+                {s.description && <p className="text-sm text-foreground mt-2">{s.description}</p>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-[11px] text-muted">Date{s.dateFin ? " de début" : ""}</p>
+                  <p className="text-foreground">{s.date || "—"}</p>
+                </div>
+                {s.dateFin && (
+                  <div>
+                    <p className="text-[11px] text-muted">Date de fin</p>
+                    <p className="text-foreground">{s.dateFin}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[11px] text-muted">Heure</p>
+                  <p className="text-foreground">{s.heure || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-muted">Durée</p>
+                  <p className="text-foreground">{s.duree || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-muted">Salle</p>
+                  <p className="text-foreground">{s.salle || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-muted">Formatrice</p>
+                  <p className="text-foreground">{s.formatrice || "—"}</p>
+                </div>
+                {s.periode && (
+                  <div className="col-span-2">
+                    <p className="text-[11px] text-muted">Période</p>
+                    <p className="text-foreground">{s.periode}</p>
+                  </div>
+                )}
+              </div>
+
+              {s.competencesCiblees.length > 0 && (
+                <div>
+                  <p className="text-[11px] text-muted mb-1.5">Compétences ciblées</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.competencesCiblees.map(c => {
+                      const t = THEMATIQUES.find(x => x.key === c)
+                      return t ? (
+                        <span key={c} className="text-[11px] bg-ateliers-light text-ateliers-dark px-2 py-0.5 rounded-full font-medium">
+                          {t.short}
+                        </span>
+                      ) : null
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {(s.taches.length > 0 || s.besoins.length > 0 || s.etapes.length > 0) && (
+                <div className="grid grid-cols-1 gap-3">
+                  {s.taches.length > 0 && (
+                    <div>
+                      <p className="text-[11px] text-muted mb-1">Tâches</p>
+                      <ul className="text-sm text-foreground list-disc list-inside space-y-0.5">
+                        {s.taches.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {s.besoins.length > 0 && (
+                    <div>
+                      <p className="text-[11px] text-muted mb-1">Besoins</p>
+                      <ul className="text-sm text-foreground list-disc list-inside space-y-0.5">
+                        {s.besoins.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {s.etapes.length > 0 && (
+                    <div>
+                      <p className="text-[11px] text-muted mb-1">Étapes</p>
+                      <ul className="text-sm text-foreground list-disc list-inside space-y-0.5">
+                        {s.etapes.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <p className="text-[11px] text-muted mb-1.5">Bénéficiaires ({benefs.length})</p>
+                {benefs.length === 0 ? (
+                  <p className="text-sm text-muted italic">Aucun bénéficiaire rattaché.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {benefs.map(b => (
+                      <span key={b.id} className="text-[11px] bg-ateliers-light text-ateliers-dark px-2 py-0.5 rounded-full">
+                        {b.prenom} {b.nom}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="text-[11px] text-muted mb-1.5">Intervenants ({intervs.length})</p>
+                {intervs.length === 0 ? (
+                  <p className="text-sm text-muted italic">Aucun intervenant rattaché.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {intervs.map(iv => (
+                      <span key={iv.ID_Intervenant} className="text-[11px] bg-benevoles-light text-benevoles-dark px-2 py-0.5 rounded-full">
+                        {iv.Prenom} {iv.Nom}{iv.Type && ` · ${iv.Type}`}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {bvls.length > 0 && (
+                <div>
+                  <p className="text-[11px] text-muted mb-1.5">Bénévoles ({bvls.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bvls.map(bv => (
+                      <span key={bv.id} className="text-[11px] bg-benevoles-light text-benevoles-dark px-2 py-0.5 rounded-full">
+                        {bv.nom}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {groupesAtelier.length > 0 && (
+                <div>
+                  <p className="text-[11px] text-muted mb-1.5">Groupes rattachés ({groupesAtelier.length})</p>
+                  <div className="flex flex-col gap-1.5">
+                    {groupesAtelier.map(g => (
+                      <span key={g.id} className="text-sm text-foreground bg-slate-50 border border-border rounded-lg px-3 py-1.5">
+                        {g.nom}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => openEditSession(s)}
+                  className="w-full bg-slate-900 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-700 transition-colors"
+                >
+                  Modifier
+                </button>
+                <DeleteButton onClick={() => handleDeleteAtelier(s.id)} />
+              </div>
+            </div>
+          )
+        })()}
+      </SlideOver>
 
       {/* ════════════════════════════════════════
           SLIDEOVER — Atelier / Session
@@ -2073,7 +2275,7 @@ export default function AteliersPage() {
           })()}
 
           <SaveButton />
-          {editingSession && <DeleteButton onClick={handleDeleteSession} />}
+          {editingSession && <DeleteButton onClick={() => handleDeleteAtelier(editingSession.id)} />}
         </form>
       </SlideOver>
 
