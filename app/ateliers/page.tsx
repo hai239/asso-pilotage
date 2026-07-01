@@ -30,7 +30,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
-  ChevronDown, ChevronRight, Search, GraduationCap, Eye,
+  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -816,6 +816,18 @@ const emptyGroupe = (): Omit<Groupe, "id"> => ({
   atelierId: null,
 })
 
+interface IntervenantForm {
+  Nom: string
+  Prenom: string
+  Type: string
+  Email: string
+  Telephone: string
+  Statut: string
+}
+const emptyIntervenantForm = (): IntervenantForm => ({
+  Nom: "", Prenom: "", Type: "", Email: "", Telephone: "", Statut: "actif",
+})
+
 // ══════════════════════════════════════════════
 // ONGLET ATELIERS
 // ══════════════════════════════════════════════
@@ -1311,12 +1323,117 @@ function GroupesTab({
 }
 
 // ══════════════════════════════════════════════
+// ONGLET GESTION DES INTERVENANTS — lecture/écriture table INTERVENANT
+// ══════════════════════════════════════════════
+function IntervenantsTab({
+  intervenants, onEdit, onNew,
+}: {
+  intervenants: IntervenantSheet[]
+  onEdit: (iv: IntervenantSheet) => void
+  onNew: () => void
+}) {
+  const [search, setSearch] = useState("")
+  const q = search.trim().toLowerCase()
+  const filtered = intervenants
+    .filter(iv => !q || `${iv.Prenom} ${iv.Nom} ${iv.Type}`.toLowerCase().includes(q))
+    .sort((a, b) => `${a.Prenom} ${a.Nom}`.localeCompare(`${b.Prenom} ${b.Nom}`))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input
+            type="text"
+            placeholder="Rechercher un intervenant (nom, type…)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-benevoles/30"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              aria-label="Effacer la recherche"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        {q !== "" && (
+          <span className="text-xs text-muted">{filtered.length} résultat{filtered.length > 1 ? "s" : ""}</span>
+        )}
+      </div>
+
+      {intervenants.length === 0 ? (
+        <div className="text-center py-16 bg-surface rounded-xl border border-border">
+          <div className="mx-auto mb-4 inline-flex p-3 rounded-full bg-slate-50">
+            <UserCog size={32} className="text-slate-300" />
+          </div>
+          <p className="font-semibold text-foreground">Aucun intervenant</p>
+          <p className="text-sm text-muted mt-1 max-w-md mx-auto">
+            Ajoute un premier bénévole, stagiaire ou animateur pour pouvoir le rattacher aux ateliers.
+          </p>
+          <button
+            onClick={onNew}
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
+          >
+            <Plus size={14} /> Nouvel intervenant
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="text-center text-sm text-muted py-12 italic">Aucun intervenant ne correspond à la recherche.</p>
+      ) : (
+        <ul className="bg-surface rounded-xl border border-border divide-y divide-border overflow-hidden">
+          {filtered.map(iv => (
+            <li
+              key={iv.ID_Intervenant}
+              onClick={() => onEdit(iv)}
+              className="px-5 py-3.5 flex items-center gap-4 hover:bg-slate-50 cursor-pointer group"
+            >
+              <div className="w-9 h-9 rounded-full bg-benevoles-light flex items-center justify-center shrink-0">
+                <span className="text-xs font-bold text-benevoles-dark">{initials(iv.Prenom, iv.Nom)}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{iv.Prenom} {iv.Nom}</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  {iv.Type && (
+                    <span className="text-[10px] bg-benevoles-light text-benevoles-dark px-1.5 py-0.5 rounded-full">{iv.Type}</span>
+                  )}
+                  {iv.Email && <span className="text-[11px] text-muted truncate">{iv.Email}</span>}
+                  {iv.Telephone && <span className="text-[11px] text-muted">{iv.Telephone}</span>}
+                </div>
+              </div>
+              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                iv.Statut === "inactif" ? "bg-slate-100 text-slate-500" : "bg-green-50 text-green-700"
+              }`}>
+                {iv.Statut || "actif"}
+              </span>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onEdit(iv) }}
+                className="p-1.5 rounded-lg hover:bg-white text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                aria-label={`Modifier ${iv.Prenom} ${iv.Nom}`}
+              >
+                <Pencil size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════
 // PAGE PRINCIPALE
 // ══════════════════════════════════════════════
 const TABS = [
-  { id: "ateliers",  label: "Ateliers",         icon: CalendarDays },
-  { id: "brouillon", label: "Brouillon groupes", icon: Shuffle },
-  { id: "groupes",   label: "Groupes",          icon: Columns3 },
+  { id: "ateliers",      label: "Ateliers",                icon: CalendarDays },
+  { id: "brouillon",     label: "Brouillon groupes",       icon: Shuffle },
+  { id: "groupes",       label: "Groupes",                 icon: Columns3 },
+  { id: "intervenants",  label: "Gestion des intervenants", icon: UserCog },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
@@ -1369,6 +1486,16 @@ export default function AteliersPage() {
 
   // ── Intervenants / animateurs (depuis le Sheet, table INTERVENANT) ──
   const [intervenants, setIntervenants] = useState<IntervenantSheet[]>([])
+  const [intervenantSlide, setIntervenantSlide] = useState(false)
+  const [editingIntervenant, setEditingIntervenant] = useState<IntervenantSheet | null>(null)
+  const [intervenantForm, setIntervenantForm] = useState(emptyIntervenantForm())
+
+  function reloadIntervenants() {
+    return fetch("/api/sheets?action=getIntervenants")
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: IntervenantSheet[]) => setIntervenants(rows))
+      .catch(() => setIntervenants([]))
+  }
 
   // ── Membres (liste éditable côté /membres, on lit depuis localStorage pour
   //    refléter les ajouts/modifs faits sur l'autre page) ──
@@ -1403,10 +1530,7 @@ export default function AteliersPage() {
       .then((rows: BeneficiaireSheet[]) => setBeneficiaires(rows.map(beneficiaireFromSheet)))
       .catch(() => setBeneficiaires([]))
     // ── Intervenants : lecture depuis Google Sheets (table INTERVENANT) — étape 4a.
-    fetch("/api/sheets?action=getIntervenants")
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((rows: IntervenantSheet[]) => setIntervenants(rows))
-      .catch(() => setIntervenants([]))
+    reloadIntervenants()
     // Migration auto des groupes : les anciens enregistrements n'ont pas de
     // champ atelierId, on le force à null pour qu'ils restent affichés dans
     // le sous-onglet Groupes mais pas attachés à un atelier.
@@ -1518,6 +1642,9 @@ export default function AteliersPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setSessionSlide(false)
       setDetailSlide(false)
+      // Détache les groupes locaux (sous-onglet Groupes, créés à la main) qui
+      // référençaient cet atelier — sinon ils gardent un atelierId fantôme.
+      persistGroupes(groupes.map(g => g.atelierId === id ? { ...g, atelierId: null } : g))
       await reloadAteliers()
       setToast({ message: "Atelier supprimé du Sheet." })
     } catch {
@@ -1644,6 +1771,55 @@ export default function AteliersPage() {
     persistGroupes(groupes.map(g => g.id === groupeId ? { ...g, beneficiaireIds } : g))
   }
 
+  // ── Intervenants CRUD (table INTERVENANT du Sheet) ──
+  function openNewIntervenant() {
+    setEditingIntervenant(null)
+    setIntervenantForm(emptyIntervenantForm())
+    setIntervenantSlide(true)
+  }
+  function openEditIntervenant(iv: IntervenantSheet) {
+    setEditingIntervenant(iv)
+    setIntervenantForm({
+      Nom: iv.Nom, Prenom: iv.Prenom, Type: iv.Type,
+      Email: iv.Email, Telephone: iv.Telephone, Statut: iv.Statut || "actif",
+    })
+    setIntervenantSlide(true)
+  }
+  async function handleSaveIntervenant() {
+    const body = editingIntervenant
+      ? { action: "updateIntervenant", idIntervenant: editingIntervenant.ID_Intervenant, data: intervenantForm }
+      : { action: "addIntervenant", data: intervenantForm }
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setIntervenantSlide(false)
+      await reloadIntervenants()
+      setToast({ message: editingIntervenant ? "Intervenant mis à jour dans le Sheet." : "Intervenant créé dans le Sheet." })
+    } catch {
+      setToast({ message: "Erreur : l'enregistrement dans le Sheet a échoué." })
+    }
+  }
+  async function handleDeleteIntervenant(id: string) {
+    if (!confirm("Supprimer définitivement cet intervenant ? Il sera retiré de tous les ateliers où il est rattaché.")) return
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteIntervenant", idIntervenant: id }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setIntervenantSlide(false)
+      await reloadIntervenants()
+      // Rafraîchit les ateliers : leurs intervenantIds dérivés d'ATELIER_PARTICIPANT
+      // ont changé côté Sheet suite à la cascade de suppression.
+      await reloadAteliers()
+      setToast({ message: "Intervenant supprimé du Sheet." })
+    } catch {
+      setToast({ message: "Erreur : la suppression a échoué." })
+    }
+  }
+
   // ── Filtrage par audience (Lot D) ──
   // Une session a un champ `audience` ; on filtre toutes les vues par celui-ci.
   // Pour les groupes : on garde ceux dont l'atelier rattaché correspond à
@@ -1694,6 +1870,14 @@ export default function AteliersPage() {
               className="flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
             >
               <Plus size={14} /> Nouvel atelier
+            </button>
+          )}
+          {tab === "intervenants" && (
+            <button
+              onClick={openNewIntervenant}
+              className="flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
+            >
+              <Plus size={14} /> Nouvel intervenant
             </button>
           )}
         </div>
@@ -1818,6 +2002,9 @@ export default function AteliersPage() {
           onUpdateGroupeValide={updateGroupeValideMembers}
           onSupprimerGroupeValide={deleteGroupeValide}
         />
+      )}
+      {tab === "intervenants" && (
+        <IntervenantsTab intervenants={intervenants} onEdit={openEditIntervenant} onNew={openNewIntervenant} />
       )}
 
       {/* ════════════════════════════════════════
@@ -2395,6 +2582,71 @@ export default function AteliersPage() {
 
           <SaveButton />
           {editingGroupe && <DeleteButton onClick={handleDeleteGroupe} />}
+        </form>
+      </SlideOver>
+
+      {/* ════════════════════════════════════════
+          SLIDEOVER — Intervenant (table INTERVENANT du Sheet)
+      ════════════════════════════════════════ */}
+      <SlideOver
+        open={intervenantSlide}
+        onClose={() => setIntervenantSlide(false)}
+        title={editingIntervenant ? "Modifier l'intervenant" : "Nouvel intervenant"}
+        width="md"
+      >
+        <form onSubmit={e => { e.preventDefault(); handleSaveIntervenant() }} className="flex flex-col gap-4">
+          <FormRow>
+            <Field label="Prénom" required>
+              <Input
+                value={intervenantForm.Prenom}
+                onChange={e => setIntervenantForm(f => ({ ...f, Prenom: e.target.value }))}
+              />
+            </Field>
+            <Field label="Nom" required>
+              <Input
+                value={intervenantForm.Nom}
+                onChange={e => setIntervenantForm(f => ({ ...f, Nom: e.target.value }))}
+              />
+            </Field>
+          </FormRow>
+          <FormRow>
+            <Field label="Type">
+              <Input
+                placeholder="Bénévole, Stagiaire, Salarié·e…"
+                value={intervenantForm.Type}
+                onChange={e => setIntervenantForm(f => ({ ...f, Type: e.target.value }))}
+              />
+            </Field>
+            <Field label="Statut">
+              <Select
+                value={intervenantForm.Statut}
+                onChange={e => setIntervenantForm(f => ({ ...f, Statut: e.target.value }))}
+              >
+                <option value="actif">Actif</option>
+                <option value="inactif">Inactif</option>
+              </Select>
+            </Field>
+          </FormRow>
+          <FormRow>
+            <Field label="Email">
+              <Input
+                type="email"
+                value={intervenantForm.Email}
+                onChange={e => setIntervenantForm(f => ({ ...f, Email: e.target.value }))}
+              />
+            </Field>
+            <Field label="Téléphone">
+              <Input
+                value={intervenantForm.Telephone}
+                onChange={e => setIntervenantForm(f => ({ ...f, Telephone: e.target.value }))}
+              />
+            </Field>
+          </FormRow>
+
+          <SaveButton />
+          {editingIntervenant && (
+            <DeleteButton onClick={() => handleDeleteIntervenant(editingIntervenant.ID_Intervenant)} />
+          )}
         </form>
       </SlideOver>
 

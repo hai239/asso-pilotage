@@ -90,6 +90,9 @@ export async function POST(request: NextRequest) {
       case "addAtelier":      return ok(await addAtelier(sheets, body.data, body.beneficiaireIds, body.intervenantIds))
       case "updateAtelier":   return ok(await updateAtelier(sheets, body.idAtelier, body.data, body.beneficiaireIds, body.intervenantIds))
       case "deleteAtelier":   return ok(await deleteAtelier(sheets, body.idAtelier))
+      case "addIntervenant":    return ok(await addIntervenant(sheets, body.data))
+      case "updateIntervenant": return ok(await updateIntervenant(sheets, body.idIntervenant, body.data))
+      case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
       default:
@@ -462,6 +465,43 @@ async function getIntervenants(sheets: Sheets) {
     Telephone: r["Telephone"] ?? "",
     Statut: r["Statut"] ?? "",
   }))
+}
+
+// ── ÉCRITURE INTERVENANT ──────────────────────────────────
+
+async function addIntervenant(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "INTERVENANT")
+  await appendRow(sheets, "INTERVENANT", {
+    "ID": id,
+    "Nom": data.Nom ?? "",
+    "Prenom": data.Prenom ?? "",
+    "Type": data.Type ?? "",
+    "Email": data.Email ?? "",
+    "Telephone": data.Telephone ?? "",
+    "Statut": data.Statut ?? "actif",
+  })
+  return { ok: true, ID_Intervenant: String(id) }
+}
+
+async function updateIntervenant(sheets: Sheets, idIntervenant: string, data: Record<string, unknown>) {
+  const map: Record<string, unknown> = {}
+  if (data.Nom !== undefined)       map["Nom"] = data.Nom
+  if (data.Prenom !== undefined)    map["Prenom"] = data.Prenom
+  if (data.Type !== undefined)      map["Type"] = data.Type
+  if (data.Email !== undefined)     map["Email"] = data.Email
+  if (data.Telephone !== undefined) map["Telephone"] = data.Telephone
+  if (data.Statut !== undefined)    map["Statut"] = data.Statut
+  const ok = await updateRowById(sheets, "INTERVENANT", idIntervenant, map)
+  return ok ? { ok: true } : { error: "Intervenant introuvable" }
+}
+
+async function deleteIntervenant(sheets: Sheets, idIntervenant: string) {
+  // Cascade : retire les liens de cet intervenant sur tous les ateliers avant
+  // de supprimer sa fiche, pour ne pas laisser de lignes ATELIER_PARTICIPANT
+  // orphelines pointant vers un intervenant qui n'existe plus.
+  await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Intervenant ID", [String(idIntervenant)])
+  const deleted = await deleteRowById(sheets, "INTERVENANT", idIntervenant)
+  return deleted ? { ok: true } : { error: "Intervenant introuvable" }
 }
 
 // ── ÉCRITURE FAMILLE ──────────────────────────────────────
@@ -871,7 +911,9 @@ async function updateAtelier(
 }
 
 async function deleteAtelier(sheets: Sheets, idAtelier: string) {
+  // Cascade : liens bénéficiaires/intervenants + émargement rattachés à cet atelier.
   await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Atelier ID", [String(idAtelier)])
+  await deleteRowsWhere(sheets, "ASSIDUITE", "Evenement2 ID", [String(idAtelier)])
   const deleted = await deleteRowById(sheets, "EVENEMENT2", idAtelier)
   return deleted ? { ok: true } : { error: "Atelier introuvable" }
 }
