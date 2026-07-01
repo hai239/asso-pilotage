@@ -1524,6 +1524,41 @@ export default function AteliersPage() {
       setToast({ message: "Erreur : la suppression a échoué." })
     }
   }
+  /** CRUD direct (sous-onglet Brouillon groupes) sur un groupe déjà composé —
+   *  écrit ses membres dans le Sheet sans passer par un brouillon local.
+   *  Rejette en cas d'échec pour que l'appelant ne referme pas l'UI à tort. */
+  async function updateGroupeValideMembers(atelierId: number, beneficiaireIds: number[]) {
+    const source = sessions.find(s => s.id === atelierId)
+    if (!source) throw new Error("Atelier introuvable.")
+    const payload = atelierPayload({ ...source, beneficiaireIds })
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateAtelier", idAtelier: String(atelierId), ...payload }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await reloadAteliers()
+      setToast({ message: "Membres du groupe mis à jour dans le Sheet." })
+    } catch (e) {
+      setToast({ message: "Erreur : la mise à jour des membres a échoué." })
+      throw e
+    }
+  }
+  /** Supprime définitivement un groupe déjà composé (sous-onglet Brouillon groupes). */
+  async function deleteGroupeValide(atelierId: number) {
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteAtelier", idAtelier: String(atelierId) }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await reloadAteliers()
+      setToast({ message: "Groupe supprimé du Sheet." })
+    } catch (e) {
+      setToast({ message: "Erreur : la suppression a échoué." })
+      throw e
+    }
+  }
   function toggleBenefInSession(id: number) {
     setSessionForm(f => ({
       ...f,
@@ -1743,7 +1778,7 @@ export default function AteliersPage() {
             // composé en une nouvelle ligne ATELIER (même type/dates/compétences
             // que l'atelier "type" d'origine), puis on supprime l'atelier "type".
             const source = sessions.find(s => s.id === atelierId)
-            if (!source) return
+            if (!source) throw new Error("Atelier source introuvable.")
             try {
               for (let i = 0; i < nouveaux.length; i++) {
                 const g = nouveaux[i]
@@ -1765,8 +1800,11 @@ export default function AteliersPage() {
               })
               await reloadAteliers()
               setToast({ message: `${nouveaux.length} groupe${nouveaux.length > 1 ? "s" : ""} créé${nouveaux.length > 1 ? "s" : ""} dans le Sheet.` })
-            } catch {
+            } catch (e) {
+              // Rethrow : le brouillon (sous-onglet Brouillon) doit rester intact
+              // et ne pas basculer d'onglet tant que l'écriture Sheet n'a pas réussi.
               setToast({ message: "Erreur lors de la création des groupes dans le Sheet." })
+              throw e
             }
           }}
           onAtelierBenefsUpdated={() => {
@@ -1777,6 +1815,8 @@ export default function AteliersPage() {
             // Bascule sur l'onglet Ateliers pour voir les lignes-groupes créées.
             setTab("ateliers")
           }}
+          onUpdateGroupeValide={updateGroupeValideMembers}
+          onSupprimerGroupeValide={deleteGroupeValide}
         />
       )}
 
