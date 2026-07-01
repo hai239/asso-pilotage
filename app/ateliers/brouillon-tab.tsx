@@ -550,6 +550,8 @@ export default function BrouillonGroupesTab(props: {
                   groupe={groupeVirtuel}
                   audience={atelier.audience}
                   onOpen={() => ouvrirGroupe(atelier.id, groupeVirtuel.id, true)}
+                  onDelete={() => supprimerGroupeLive(atelier.id)}
+                  deleting={liveUpdatingId === atelier.id}
                 />
               )}
 
@@ -584,6 +586,7 @@ export default function BrouillonGroupesTab(props: {
                       onRemoveMember={benefId => removeMember(atelier.id, g.id, benefId)}
                       onAddMember={benefId => addMember(atelier.id, g.id, benefId)}
                       onOpen={() => ouvrirGroupe(atelier.id, g.id, false)}
+                      onDelete={() => supprimerGroupe(atelier.id, g.id)}
                       benefsLibres={getBenefsLibres(brouillon)}
                     />
                   ))}
@@ -888,26 +891,41 @@ function GroupeComposeCard(props: {
   groupe: GroupeBrouillon
   audience: FicheAtelier["audience"]
   onOpen: () => void
+  /** Suppression directe du groupe (raccourci sans passer par la vue détail). */
+  onDelete: () => void
+  deleting: boolean
 }) {
-  const { groupe, audience, onOpen } = props
+  const { groupe, audience, onOpen, onDelete, deleting } = props
   const isParents = audience === "parents"
   const Icon = isParents ? UserCheck : GraduationCap
   const n = groupe.beneficiaireIds.length
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title="Voir le détail du groupe"
-      className="w-full flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-left hover:bg-slate-50 hover:border-ateliers/40 transition-colors"
-    >
-      <span className="flex items-center gap-2 min-w-0">
-        <Icon size={14} className={`shrink-0 ${isParents ? "text-communication-dark" : "text-ateliers-dark"}`} />
-        <span className="text-xs font-semibold text-foreground truncate">{groupe.nom}</span>
-      </span>
-      <span className="text-[10px] text-muted shrink-0">
-        {n} {isParents ? "parent" : "bénéficiaire"}{n > 1 ? "s" : ""} · Voir le détail
-      </span>
-    </button>
+    <div className="w-full flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2.5 hover:bg-slate-50 hover:border-ateliers/40 transition-colors">
+      <button
+        type="button"
+        onClick={onOpen}
+        title="Voir le détail du groupe"
+        className="flex-1 min-w-0 flex items-center justify-between gap-3 text-left"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <Icon size={14} className={`shrink-0 ${isParents ? "text-communication-dark" : "text-ateliers-dark"}`} />
+          <span className="text-xs font-semibold text-foreground truncate">{groupe.nom}</span>
+        </span>
+        <span className="text-[10px] text-muted shrink-0">
+          {n} {isParents ? "parent" : "bénéficiaire"}{n > 1 ? "s" : ""} · Voir le détail
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        disabled={deleting}
+        title="Supprimer ce groupe"
+        aria-label={`Supprimer le groupe ${groupe.nom}`}
+        className="p-1.5 rounded-lg text-muted hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:cursor-wait shrink-0"
+      >
+        <X size={13} />
+      </button>
+    </div>
   )
 }
 
@@ -929,10 +947,12 @@ function GroupeCard(props: {
   benefsLibres: Beneficiaire[]
   /** Ouvre la vue détaillée du groupe (clic sur l'en-tête de la carte). */
   onOpen: () => void
+  /** Supprime ce groupe du brouillon directement (raccourci sans ouvrir le détail). */
+  onDelete: () => void
 }) {
   const {
     groupe, atelierId, audience, dims, benefById, onDragStart, onDrop,
-    onRemoveMember, onAddMember, benefsLibres, onOpen,
+    onRemoveMember, onAddMember, benefsLibres, onOpen, onDelete,
   } = props
   const [over, setOver] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -967,6 +987,15 @@ function GroupeCard(props: {
               <UserCheck size={9} /> {groupe.encadrantsRequis} encadrant·e{groupe.encadrantsRequis > 1 ? "s" : ""}
             </span>
           )}
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onDelete() }}
+            title="Supprimer ce groupe"
+            aria-label={`Supprimer le groupe ${groupe.nom}`}
+            className="p-1 rounded text-muted hover:bg-red-50 hover:text-red-600"
+          >
+            <X size={12} />
+          </button>
         </div>
       </header>
 

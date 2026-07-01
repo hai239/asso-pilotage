@@ -832,7 +832,7 @@ const emptyIntervenantForm = (): IntervenantForm => ({
 // ONGLET ATELIERS
 // ══════════════════════════════════════════════
 function AteliersTab({
-  sessions, beneficiaires, benevoles, groupes, onEdit, onView,
+  sessions, beneficiaires, benevoles, groupes, onEdit, onView, onDelete,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
@@ -840,6 +840,7 @@ function AteliersTab({
   groupes: Groupe[]
   onEdit: (s: Session) => void
   onView: (s: Session) => void
+  onDelete: (id: number) => void
 }) {
   // ── Filtres + recherche ──
   const [search, setSearch]            = useState("")
@@ -1062,6 +1063,9 @@ function AteliersTab({
           <button onClick={() => onEdit(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted" aria-label="Modifier">
             <Pencil size={13} />
           </button>
+          <button onClick={() => onDelete(s.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-600" aria-label="Supprimer">
+            <X size={13} />
+          </button>
         </div>
       </li>
     )
@@ -1165,12 +1169,13 @@ function AteliersTab({
 // (Categorie). Cliquer sur un groupe ouvre l'atelier correspondant.
 // ══════════════════════════════════════════════
 function GroupesTab({
-  sessions, beneficiaires, onEdit, onView,
+  sessions, beneficiaires, onEdit, onView, onDelete,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
   onEdit: (s: Session) => void
   onView: (s: Session) => void
+  onDelete: (id: number) => void
 }) {
   const [search, setSearch] = useState("")
 
@@ -1308,6 +1313,14 @@ function GroupesTab({
                           aria-label="Modifier le groupe"
                         >
                           <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); onDelete(s.id) }}
+                          className="p-1.5 rounded-lg hover:bg-white text-muted hover:text-red-600 opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0"
+                          aria-label="Supprimer le groupe"
+                        >
+                          <X size={13} />
                         </button>
                       </li>
                     )
@@ -1938,6 +1951,7 @@ export default function AteliersPage() {
             groupes={groupesForAudience}
             onEdit={openEditSession}
             onView={openViewSession}
+            onDelete={handleDeleteAtelier}
           />
         )
       )}
@@ -1950,6 +1964,7 @@ export default function AteliersPage() {
             beneficiaires={beneficiaires}
             onEdit={openEditSession}
             onView={openViewSession}
+            onDelete={handleDeleteAtelier}
           />
         )
       )}
