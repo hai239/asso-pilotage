@@ -34,6 +34,49 @@ export function trancheFor(age: number | null): TrancheAge | null {
 }
 
 // ──────────────────────────────────────────────
+// Cycle scolaire — barrière dure pour la composition des groupes ÉLÈVES
+// ──────────────────────────────────────────────
+// Règle métier (décidée avec l'association) :
+//   • "primaire_6e"   = élémentaire (CP→CM2) + 6e
+//   • "college_lycee" = 5e, 4e, 3e + lycée (2de, 1re, Tle, CAP…)
+// Un élève d'un cycle ne se mélange jamais avec l'autre, même à notes égales.
+// Le cycle se déduit de la classe (INSCRIPTION "Niveau / Classe") ; à défaut,
+// on retombe sur l'âge (≤ 11 ans → primaire+6e, ≥ 12 → collège+lycée).
+
+export type CycleScolaire = "primaire_6e" | "college_lycee"
+
+export const CYCLES: { key: CycleScolaire; label: string }[] = [
+  { key: "primaire_6e",   label: "Élémentaire + 6e" },
+  { key: "college_lycee", label: "Collège + Lycée" },
+]
+
+/** Niveau d'école fin — sert à filtrer les élèves proposés selon le type d'atelier :
+ *  marionnettes = élémentaire + 6e ; théâtre = collège + lycée + 6e. */
+export type NiveauEcole = "elementaire" | "6e" | "college" | "lycee"
+
+export function niveauEcole(classe: string | undefined | null): NiveauEcole | null {
+  const c = (classe ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "")
+  if (!c) return null
+  if (/(^|[^0-9])6e(me)?([^0-9]|$)/.test(c)) return "6e"
+  if (/(cp|ce1|ce2|cm1|cm2|maternelle|gs|ms|ps)/.test(c)) return "elementaire"
+  if (/(5e|5eme|4e|4eme|3e|3eme)/.test(c)) return "college"
+  if (/(2de|2nde|seconde|1re|1ere|premiere|terminale|tle|cap|lyc|bac)/.test(c)) return "lycee"
+  return null
+}
+
+/** Déduit le cycle scolaire d'un élève depuis sa classe (prioritaire) ou son âge. */
+export function cycleForClasse(classe: string | undefined | null, age: number | null): CycleScolaire | null {
+  const c = (classe ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "")
+  if (c) {
+    // 6e testé côté primaire AVANT le collège pour éviter tout faux positif.
+    if (/(cp|ce1|ce2|cm1|cm2|6e|6eme|maternelle)/.test(c)) return "primaire_6e"
+    if (/(5e|5eme|4e|4eme|3e|3eme|2de|2nde|seconde|1re|1ere|premiere|terminale|tle|cap|lyc|bac)/.test(c)) return "college_lycee"
+  }
+  if (age !== null) return age <= 11 ? "primaire_6e" : "college_lycee"
+  return null
+}
+
+// ──────────────────────────────────────────────
 // Fiche descriptive — nouveaux champs étendus
 // ──────────────────────────────────────────────
 
@@ -83,6 +126,11 @@ export interface FicheAtelier {
    *  True = hétérogène (mélange volontaire des niveaux). */
   mixerNiveaux: boolean
 
+  /** Critère de composition des groupes :
+   *  • "notes" (défaut) → par niveau (notes du positionnement) + cycle scolaire ;
+   *  • "disponibilite" → par créneau de disponibilité, sans notes (théâtre/marionnettes). */
+  modeGroupage: "notes" | "disponibilite"
+
   // Organisation libre — alimentent la fiche descriptive, pas l'algo
   taches: string[]
   besoins: string[]
@@ -109,6 +157,7 @@ export function emptyFiche(): FicheAtelier {
     tailleGroupeCible: null,
     ratioEncadrement: null,
     mixerNiveaux: false,
+    modeGroupage: "notes",
     taches: [],
     besoins: [],
     etapes: [],
@@ -144,6 +193,7 @@ export function migrateFiche<T extends FicheAtelierLegacy>(s: T): T & FicheAteli
     tailleGroupeCible:      s.tailleGroupeCible      ?? null,
     ratioEncadrement:       s.ratioEncadrement       ?? null,
     mixerNiveaux:           s.mixerNiveaux           ?? false,
+    modeGroupage:           s.modeGroupage           ?? "notes",
     taches:                 s.taches                 ?? [],
     besoins:                s.besoins                ?? [],
     etapes:                 s.etapes                 ?? [],

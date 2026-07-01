@@ -260,6 +260,54 @@ export async function deleteRowsWhere(
   return toDelete.length
 }
 
+/** Comme deleteRowsWhere, mais avec plusieurs conditions combinées en ET
+ *  (ex : Atelier ID = X ET Role = "Beneficiaire") — nécessaire quand une même
+ *  feuille mélange plusieurs types de lignes (ATELIER_PARTICIPANT). */
+export async function deleteRowsWhereAll(
+  sheets: Sheets,
+  sheetName: string,
+  filters: Record<string, string>
+): Promise<number> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: sheetName,
+  })
+  const rows = res.data.values ?? []
+  if (rows.length < 2) return 0
+  const headers = rows[0] as string[]
+  const cols = Object.entries(filters).map(([h, v]) => ({ index: headers.indexOf(h), value: v }))
+  if (cols.some((c) => c.index < 0)) return 0
+
+  const toDelete: number[] = []
+  rows.forEach((row, i) => {
+    if (i === 0) return
+    if (cols.every((c) => String(row[c.index] ?? "") === c.value)) toDelete.push(i)
+  })
+  if (!toDelete.length) return 0
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID })
+  const sheet = meta.data.sheets?.find((s) => s.properties?.title === sheetName)
+  if (!sheet?.properties?.sheetId) return 0
+
+  const sortedDesc = [...toDelete].sort((a, b) => b - a)
+  const requests = sortedDesc.map((rowIndex) => ({
+    deleteDimension: {
+      range: {
+        sheetId: sheet.properties!.sheetId,
+        dimension: "ROWS" as const,
+        startIndex: rowIndex,
+        endIndex: rowIndex + 1,
+      },
+    },
+  }))
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: { requests },
+  })
+  return toDelete.length
+}
+
 export function parseDateFr(s: string): string {
   if (!s) return ""
   const parts = String(s).split("/")

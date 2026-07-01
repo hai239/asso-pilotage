@@ -6,6 +6,7 @@ import {
   THEMATIQUES,
   moyenne as notesMoyenne,
   migrate as migrateBenef,
+  emptyNotes,
   type NotesPositionnement,
   type Thematique,
   type TypeBeneficiaire,
@@ -14,6 +15,7 @@ import {
   emptyFiche,
   migrateFiche,
   encadrantsRequis,
+  niveauEcole,
   COULEURS_ATELIER,
   type FicheAtelier,
   type CouleurAtelier,
@@ -46,15 +48,19 @@ type Audience      = "eleves" | "parents"
 
 interface Session extends FicheAtelier {
   id: number
+  categorie: string        // type d'atelier (Littérature, Théâtre…) → colonne Categorie
+  groupe: string           // libellé du groupe/niveau (A1, A2…) → colonne Groupe
   titre: string
   description: string
-  date: string
+  date: string             // date de début (et date unique côté parents)
+  dateFin: string          // date de fin — élèves uniquement (vide pour les parents)
   heure: string
   duree: string
   salle: string
   formatrice: string
   beneficiaireIds: number[]
   benevoleIds: number[]
+  intervenantIds: number[] // animateurs (table INTERVENANT)
   statut: SessionStatut
 }
 
@@ -76,6 +82,11 @@ interface Beneficiaire {
   notes: string
   statut: StatutBenef
   parentIds: number[]
+  // Champs issus du Sheet (INSCRIPTION/EVALUATION) — utilisés au groupage (étape 6).
+  niveauClasse?: string   // "6eme", "CM2"… (INSCRIPTION "Niveau / Classe")
+  disponibilite?: string  // "Jeudi matin"… (INSCRIPTION "Disponibilite")
+  niveauCECRL?: string    // "A2-"… (EVALUATION "Niveau attribue")
+  typeApprenant?: string  // "FLE" / "Soutien scolaire"
 }
 
 interface Groupe {
@@ -101,6 +112,446 @@ const S_PRESENCES = (id: number) => `asso-presences-atelier-${id}`
 function load<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback } catch { return fallback }
+}
+
+// ──────────────────────────────────────────────
+// Lecture depuis Google Sheets (table ATELIER) — étape 3a
+// ──────────────────────────────────────────────
+// Forme renvoyée par /api/sheets?action=getAteliers (cf. route.ts getAteliers).
+interface AtelierSheet {
+  ID_Atelier: string
+  Categorie: string
+  Groupe: string
+  Titre: string
+  Audience: string
+  Date_Debut: string
+  Date_Fin: string
+  Periode: string
+  Heure_Debut: string
+  Heure_Fin: string
+  Salle: string
+  Mode_Groupage: string
+  Taille_Cible: string
+  Ratio_Encadrement: string
+  Competences_Ciblees: string[]
+  Taches: string
+  Besoins: string
+  Etapes: string
+  Statut: string
+  beneficiaireIds: string[]
+  intervenants: { ID_Intervenant: string; Heures: string; Role: string }[]
+}
+
+const SESSION_STATUTS: SessionStatut[] = ["planifié", "en cours", "terminé", "annulé"]
+
+/** Convertit une ligne ATELIER du Sheet en Session (forme attendue par la page).
+ *  Les champs texte multi-lignes (taches/besoins/etapes) sont éclatés par ligne. */
+function atelierFromSheet(a: AtelierSheet): Session {
+  const toLines = (s: string) => (s ?? "").split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+  const statut = SESSION_STATUTS.includes(a.Statut as SessionStatut)
+    ? (a.Statut as SessionStatut)
+    : "planifié"
+  return {
+    id: Number(a.ID_Atelier),
+    categorie: a.Categorie || "",
+    groupe: a.Groupe || "",
+    titre: a.Titre || [a.Categorie, a.Groupe].filter(Boolean).join(" · "),
+    description: "",
+    date: frToIso(a.Date_Debut),
+    dateFin: frToIso(a.Date_Fin),
+    heure: a.Heure_Debut || "",
+    duree: "",
+    salle: a.Salle || "",
+    formatrice: "",
+    beneficiaireIds: a.beneficiaireIds.map(Number).filter(n => !isNaN(n)),
+    benevoleIds: [],
+    intervenantIds: a.intervenants.map(i => Number(i.ID_Intervenant)).filter(n => !isNaN(n)),
+    statut,
+    // Champs FicheAtelier
+    audience: a.Audience.toLowerCase().startsWith("parent") ? "parents" : "eleves",
+    couleur: "teal",
+    competencesCiblees: a.Competences_Ciblees as Thematique[],
+    ageMin: null,
+    ageMax: null,
+    tailleGroupeCible: a.Taille_Cible ? Number(a.Taille_Cible) : null,
+    ratioEncadrement: a.Ratio_Encadrement ? Number(a.Ratio_Encadrement) : null,
+    mixerNiveaux: false,
+    modeGroupage: a.Mode_Groupage === "disponibilite" ? "disponibilite" : "notes",
+    taches: toLines(a.Taches),
+    besoins: toLines(a.Besoins),
+    etapes: toLines(a.Etapes),
+    personnesImpliqueesIds: [],
+    periode: a.Periode || "",
+  }
+}
+
+// Forme renvoyée par /api/sheets?action=getBeneficiaires.
+interface BeneficiaireSheet {
+  ID_Personne: string
+  type: TypeBeneficiaire
+  Prenom: string
+  Nom: string
+  Date_Naissance: string
+  Email: string
+  Telephone: string
+  Statut_Inscription: string
+  Niveau_Classe: string
+  Disponibilite: string
+  Type_Apprenant: string
+  Niveau_CECRL: string
+  notes: NotesPositionnement
+}
+
+/** Convertit "14/03/1989" (format Sheet) en "1989-03-14" (parsable par Date). */
+function frToIso(d: string): string {
+  const m = (d ?? "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (d ?? "")
+}
+
+/** Mappe le statut d'inscription du Sheet vers le statut bénéficiaire de la page. */
+function statutFromInscription(s: string): StatutBenef {
+  const v = (s ?? "").toLowerCase()
+  if (v.includes("diplom")) return "diplômé"
+  if (v.includes("arret") || v.includes("abandon")) return "abandon"
+  return "actif"
+}
+
+function beneficiaireFromSheet(b: BeneficiaireSheet): Beneficiaire {
+  return {
+    id: Number(b.ID_Personne),
+    type: b.type,
+    prenom: b.Prenom,
+    nom: b.Nom,
+    dateNaissance: frToIso(b.Date_Naissance),
+    email: b.Email,
+    telephone: b.Telephone,
+    nomParent: "",
+    telephoneParent: "",
+    emailParent: "",
+    dateInscription: "",
+    positionnementInitial: b.notes,
+    positionnementFinal: emptyNotes(),
+    niveau: "débutant",
+    notes: "",
+    statut: statutFromInscription(b.Statut_Inscription),
+    parentIds: [],
+    niveauClasse: b.Niveau_Classe,
+    disponibilite: b.Disponibilite,
+    niveauCECRL: b.Niveau_CECRL,
+    typeApprenant: b.Type_Apprenant,
+  }
+}
+
+// Forme renvoyée par /api/sheets?action=getIntervenants.
+interface IntervenantSheet {
+  ID_Intervenant: string
+  Nom: string
+  Prenom: string
+  Type: string
+  Email: string
+  Telephone: string
+  Statut: string
+}
+
+// ──────────────────────────────────────────────
+// Types d'ateliers (liste déroulante éditable, par audience)
+// Stockée en localStorage → l'utilisatrice peut ajouter / supprimer des types.
+// ──────────────────────────────────────────────
+const DEFAULT_TYPES: Record<Audience, string[]> = {
+  eleves:  ["Français intensif", "Littérature", "Exposé", "Théâtre", "Marionnettes"],
+  parents: ["Débat", "Biographique", "Numérique", "Tri des déchets", "Sortie bibliothèque"],
+}
+const S_TYPES = (a: Audience) => `asso-atelier-types-${a}`
+
+/** Sélecteur de type d'atelier avec gestion (ajout / suppression) de la liste. */
+function CategorieField({
+  audience, value, onChange,
+}: { audience: Audience; value: string; onChange: (v: string) => void }) {
+  const [types, setTypes] = useState<string[]>(DEFAULT_TYPES[audience])
+  const [manage, setManage] = useState(false)
+  const [newType, setNewType] = useState("")
+
+  useEffect(() => {
+    setTypes(load<string[]>(S_TYPES(audience), DEFAULT_TYPES[audience]))
+  }, [audience])
+
+  function persistTypes(t: string[]) {
+    setTypes(t)
+    localStorage.setItem(S_TYPES(audience), JSON.stringify(t))
+  }
+  function addType() {
+    const v = newType.trim()
+    if (v && !types.includes(v)) { persistTypes([...types, v]); onChange(v) }
+    setNewType("")
+  }
+  function removeType(t: string) {
+    persistTypes(types.filter(x => x !== t))
+    if (value === t) onChange("")
+  }
+
+  // Inclut la valeur courante même si absente de la liste (ex : type custom venu du Sheet).
+  const options = value && !types.includes(value) ? [value, ...types] : types
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <Select value={value} onChange={e => onChange(e.target.value)}>
+          <option value="">— Choisir un type —</option>
+          {options.map(t => <option key={t} value={t}>{t}</option>)}
+        </Select>
+        <button
+          type="button"
+          onClick={() => setManage(m => !m)}
+          className="text-xs text-muted hover:text-foreground whitespace-nowrap underline"
+        >
+          Gérer les types
+        </button>
+      </div>
+      {manage && (
+        <div className="mt-2 rounded-lg border border-border bg-surface p-2">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {types.map(t => (
+              <span key={t} className="text-[11px] bg-slate-100 rounded-full pl-2.5 pr-1 py-0.5 flex items-center gap-1">
+                {t}
+                <button type="button" onClick={() => removeType(t)} className="text-muted hover:text-red-600" aria-label={`Supprimer ${t}`}>
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={newType}
+              onChange={e => setNewType(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addType() } }}
+              placeholder="Nouveau type…"
+              className="flex-1 px-2.5 py-1 text-xs rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+            />
+            <button type="button" onClick={addType} className="text-xs font-medium text-ateliers-dark hover:underline flex items-center gap-1">
+              <Plus size={11} /> Ajouter
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────
+// Sélecteur d'élèves — déroulant recherchable, multi-sélection, compact.
+// Pas de filtre de disponibilité (l'asso gère les dispos ailleurs). Affiche la
+// classe de l'année courante à côté de chaque nom.
+// ──────────────────────────────────────────────
+function SelecteurBeneficiaires({
+  options, selectedIds, onToggle, placeholder,
+}: {
+  options: Beneficiaire[]
+  selectedIds: number[]
+  onToggle: (id: number) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const q = search.trim().toLowerCase()
+  const filtered = options.filter(b => !q || `${b.prenom} ${b.nom}`.toLowerCase().includes(q))
+  const selected = options.filter(b => selectedIds.includes(b.id))
+  const allFilteredSelected = filtered.length > 0 && filtered.every(b => selectedIds.includes(b.id))
+
+  function toggleAllFiltered() {
+    filtered.forEach(b => {
+      const isSel = selectedIds.includes(b.id)
+      if (allFilteredSelected && isSel) onToggle(b.id)
+      else if (!allFilteredSelected && !isSel) onToggle(b.id)
+    })
+  }
+
+  return (
+    <div>
+      {/* Champ compact */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg border border-border bg-surface hover:border-ateliers transition-colors"
+      >
+        <span className={selected.length ? "text-foreground" : "text-muted"}>
+          {selected.length
+            ? `${selected.length} élève${selected.length > 1 ? "s" : ""} sélectionné${selected.length > 1 ? "s" : ""}`
+            : (placeholder ?? "Sélectionner des élèves…")}
+        </span>
+        <ChevronDown size={14} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {/* Puces des sélectionnés */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {selected.map(b => (
+            <span key={b.id} className="text-[11px] bg-ateliers-light text-ateliers-dark rounded-full pl-2.5 pr-1 py-0.5 flex items-center gap-1">
+              {b.prenom} {b.nom}
+              <button type="button" onClick={() => onToggle(b.id)} className="hover:text-red-600" aria-label={`Retirer ${b.prenom} ${b.nom}`}>
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Panneau déroulant */}
+      {open && (
+        <div className="mt-2 rounded-xl border border-border bg-surface shadow-sm">
+          <div className="p-2 border-b border-border">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Rechercher un nom…"
+                className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+              />
+            </div>
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <p className="text-[11px] text-muted italic text-center py-4">Aucun élève.</p>
+            ) : filtered.map(b => {
+              const sel = selectedIds.includes(b.id)
+              return (
+                <button
+                  type="button"
+                  key={b.id}
+                  onClick={() => onToggle(b.id)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 text-left"
+                >
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${sel ? "bg-ateliers border-ateliers" : "border-border bg-surface"}`}>
+                    {sel && <Check size={11} className="text-white" />}
+                  </span>
+                  <span className="font-medium text-foreground">{b.prenom} {b.nom}</span>
+                  <span className="ml-auto text-[10px] text-muted">{b.niveauClasse || "—"}</span>
+                </button>
+              )
+            })}
+          </div>
+          {filtered.length > 0 && (
+            <div className="p-2 border-t border-border flex items-center justify-between">
+              <button type="button" onClick={toggleAllFiltered} className="text-[11px] font-medium text-ateliers-dark hover:underline">
+                {allFilteredSelected ? "Tout désélectionner" : "Tout sélectionner"}{q && " (filtré)"}
+              </button>
+              <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-muted hover:text-foreground">Fermer</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Même sélecteur compact que SelecteurBeneficiaires, adapté aux intervenants
+ *  (table INTERVENANT du Sheet). Utilisé dans le formulaire de création d'atelier,
+ *  identique pour l'onglet Parents et l'onglet Enfants (le champ ne dépend pas
+ *  de l'audience). */
+function SelecteurIntervenants({
+  options, selectedIds, onToggle, placeholder,
+}: {
+  options: IntervenantSheet[]
+  selectedIds: number[]
+  onToggle: (id: number) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const q = search.trim().toLowerCase()
+  const withId = options.map(iv => ({ ...iv, id: Number(iv.ID_Intervenant) }))
+  const filtered = withId.filter(iv => !q || `${iv.Prenom} ${iv.Nom}`.toLowerCase().includes(q))
+  const selected = withId.filter(iv => selectedIds.includes(iv.id))
+  const allFilteredSelected = filtered.length > 0 && filtered.every(iv => selectedIds.includes(iv.id))
+
+  function toggleAllFiltered() {
+    filtered.forEach(iv => {
+      const isSel = selectedIds.includes(iv.id)
+      if (allFilteredSelected && isSel) onToggle(iv.id)
+      else if (!allFilteredSelected && !isSel) onToggle(iv.id)
+    })
+  }
+
+  return (
+    <div>
+      {/* Champ compact */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg border border-border bg-surface hover:border-benevoles transition-colors"
+      >
+        <span className={selected.length ? "text-foreground" : "text-muted"}>
+          {selected.length
+            ? `${selected.length} intervenant${selected.length > 1 ? "s" : ""} sélectionné${selected.length > 1 ? "s" : ""}`
+            : (placeholder ?? "Sélectionner des intervenants…")}
+        </span>
+        <ChevronDown size={14} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {/* Puces des sélectionnés */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {selected.map(iv => (
+            <span key={iv.ID_Intervenant} className="text-[11px] bg-benevoles-light text-benevoles-dark rounded-full pl-2.5 pr-1 py-0.5 flex items-center gap-1">
+              {iv.Prenom} {iv.Nom}
+              <button type="button" onClick={() => onToggle(iv.id)} className="hover:text-red-600" aria-label={`Retirer ${iv.Prenom} ${iv.Nom}`}>
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Panneau déroulant */}
+      {open && (
+        <div className="mt-2 rounded-xl border border-border bg-surface shadow-sm">
+          <div className="p-2 border-b border-border">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Rechercher un nom…"
+                className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-benevoles/30"
+              />
+            </div>
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <p className="text-[11px] text-muted italic text-center py-4">Aucun intervenant.</p>
+            ) : filtered.map(iv => {
+              const sel = selectedIds.includes(iv.id)
+              return (
+                <button
+                  type="button"
+                  key={iv.ID_Intervenant}
+                  onClick={() => onToggle(iv.id)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 text-left"
+                >
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${sel ? "bg-benevoles border-benevoles" : "border-border bg-surface"}`}>
+                    {sel && <Check size={11} className="text-white" />}
+                  </span>
+                  <span className="font-medium text-foreground">{iv.Prenom} {iv.Nom}</span>
+                  <span className="ml-auto text-[10px] text-muted">{iv.Type || "—"}</span>
+                </button>
+              )
+            })}
+          </div>
+          {filtered.length > 0 && (
+            <div className="p-2 border-t border-border flex items-center justify-between">
+              <button type="button" onClick={toggleAllFiltered} className="text-[11px] font-medium text-benevoles-dark hover:underline">
+                {allFilteredSelected ? "Tout désélectionner" : "Tout sélectionner"}{q && " (filtré)"}
+              </button>
+              <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-muted hover:text-foreground">Fermer</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ──────────────────────────────────────────────
@@ -355,9 +806,10 @@ function EditableList(props: {
 // Empty factories
 // ──────────────────────────────────────────────
 const emptySession = (): Omit<Session, "id"> => ({
-  titre: "", description: "", date: new Date().toISOString().split("T")[0],
+  categorie: "", groupe: "",
+  titre: "", description: "", date: new Date().toISOString().split("T")[0], dateFin: "",
   heure: "14h00", duree: "2h", salle: "", formatrice: "",
-  beneficiaireIds: [], benevoleIds: [], statut: "planifié",
+  beneficiaireIds: [], benevoleIds: [], intervenantIds: [], statut: "planifié",
   ...emptyFiche(),
 })
 
@@ -460,8 +912,18 @@ function AteliersTab({
       <li className="px-5 py-4 flex items-start gap-4 hover:bg-slate-50 group">
         {/* Date column */}
         <div className="text-center w-14 shrink-0">
-          <p className="text-xs text-muted">{new Date(s.date).toLocaleDateString("fr-FR", { weekday: "short" })}</p>
-          <p className="text-lg font-bold text-foreground">{new Date(s.date).getDate()}</p>
+          {(() => {
+            const d = new Date(s.date)
+            const valide = !isNaN(d.getTime())
+            return valide ? (
+              <>
+                <p className="text-xs text-muted">{d.toLocaleDateString("fr-FR", { weekday: "short" })}</p>
+                <p className="text-lg font-bold text-foreground">{d.getDate()}</p>
+              </>
+            ) : (
+              <p className="text-lg font-bold text-muted">—</p>
+            )
+          })()}
           <p className="text-xs text-muted">{s.heure}</p>
         </div>
         {/* Content */}
@@ -700,84 +1162,57 @@ function AteliersTab({
 }
 
 // ══════════════════════════════════════════════
-// ONGLET GROUPES — Lot E
-// Vue regroupée par atelier : chaque atelier forme un bloc visuel coloré
-// (couleur configurée dans le formulaire d'atelier). Les groupes manuels
-// (sans atelier rattaché) sont rassemblés dans un bloc neutre en fin de liste.
+// ONGLET GROUPES — lecture depuis le Sheet
+// Chaque ligne ATELIER = un groupe. On les regroupe visuellement par TYPE
+// (Categorie). Cliquer sur un groupe ouvre l'atelier correspondant.
 // ══════════════════════════════════════════════
 function GroupesTab({
-  groupes, beneficiaires, sessions, onEdit,
+  sessions, beneficiaires, onEdit,
 }: {
-  groupes: Groupe[]
-  beneficiaires: Beneficiaire[]
   sessions: Session[]
-  onEdit: (g: Groupe) => void
+  beneficiaires: Beneficiaire[]
+  onEdit: (s: Session) => void
 }) {
-  // Seul un champ recherche est conservé (la séparation visuelle par atelier
-  // remplace les filtres atelier/type qui faisaient doublon).
   const [search, setSearch] = useState("")
 
-  function getMembers(g: Groupe): Beneficiaire[] {
-    return g.beneficiaireIds
+  function getMembers(s: Session): Beneficiaire[] {
+    return s.beneficiaireIds
       .map(id => beneficiaires.find(b => b.id === id))
       .filter((b): b is Beneficiaire => Boolean(b))
   }
 
-  // Filtrage texte (groupe / membre / titre atelier).
+  // Un "groupe" = un atelier ayant des membres (issu d'une composition validée
+  // OU d'une sélection directe théâtre/marionnettes). Les ateliers "type" sans
+  // membres (en attente de composition) ne sont pas listés ici.
+  const groupes = sessions.filter(s => s.beneficiaireIds.length > 0)
+
   const q = search.trim().toLowerCase()
-  const filtered = groupes.filter(g => {
+  const filtered = groupes.filter(s => {
     if (!q) return true
-    if (g.nom.toLowerCase().includes(q)) return true
-    const atTitre = g.atelierId !== null ? (sessions.find(s => s.id === g.atelierId)?.titre ?? "") : ""
-    if (atTitre.toLowerCase().includes(q)) return true
-    return getMembers(g).some(b =>
-      `${b.prenom} ${b.nom}`.toLowerCase().includes(q),
-    )
+    if (s.categorie.toLowerCase().includes(q) || s.groupe.toLowerCase().includes(q)) return true
+    return getMembers(s).some(b => `${b.prenom} ${b.nom}`.toLowerCase().includes(q))
   })
 
-  // Regroupement par atelier. Clés : atelier id stringifié, ou "manual" pour les
-  // groupes sans atelier rattaché.
-  type Section = {
-    key: string
-    titre: string
-    couleur: CouleurAtelier
-    groupes: Groupe[]
+  // Regroupement par type (Categorie).
+  const byCat = new Map<string, Session[]>()
+  for (const s of filtered) {
+    const k = s.categorie || "Sans type"
+    if (!byCat.has(k)) byCat.set(k, [])
+    byCat.get(k)!.push(s)
   }
-  const sectionsMap = new Map<string, Section>()
-  for (const g of filtered) {
-    const k = g.atelierId === null ? "manual" : String(g.atelierId)
-    if (!sectionsMap.has(k)) {
-      if (g.atelierId === null) {
-        sectionsMap.set(k, { key: k, titre: "Groupes manuels", couleur: "slate", groupes: [] })
-      } else {
-        const at = sessions.find(s => s.id === g.atelierId)
-        sectionsMap.set(k, {
-          key: k,
-          titre: at?.titre ?? "Atelier supprimé",
-          couleur: at?.couleur ?? "teal",
-          groupes: [],
-        })
-      }
-    }
-    sectionsMap.get(k)!.groupes.push(g)
-  }
-  // Ordre : ateliers triés par titre, manuels à la fin.
-  const sections: Section[] = Array.from(sectionsMap.values())
-    .sort((a, b) => {
-      if (a.key === "manual") return 1
-      if (b.key === "manual") return -1
-      return a.titre.localeCompare(b.titre)
-    })
+  const sections = Array.from(byCat.entries())
+    .map(([titre, grp]) => ({ titre, groupes: grp, couleur: grp[0]?.couleur ?? "teal" as CouleurAtelier }))
+    .sort((a, b) => a.titre.localeCompare(b.titre))
 
   return (
     <div className="space-y-5">
-      {/* ── Recherche (filtres atelier/type retirés — la séparation par bloc les rend inutiles) ── */}
+      {/* ── Recherche ── */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
-            placeholder="Rechercher un groupe, atelier ou bénéficiaire…"
+            placeholder="Rechercher un type, un groupe ou un bénéficiaire…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
@@ -798,93 +1233,78 @@ function GroupesTab({
         )}
       </div>
 
-      {/* ── Blocs par atelier ── */}
+      {/* ── Blocs par type ── */}
       {groupes.length === 0 ? (
-        <p className="text-center text-sm text-muted py-12 italic">Aucun groupe constitué.</p>
-      ) : sections.length === 0 ? (
         <p className="text-center text-sm text-muted py-12 italic">
-          Aucun groupe ne correspond à la recherche.
+          Aucun groupe composé. Crée un atelier puis compose ses groupes dans l&apos;onglet « Brouillon groupes ».
         </p>
+      ) : sections.length === 0 ? (
+        <p className="text-center text-sm text-muted py-12 italic">Aucun groupe ne correspond à la recherche.</p>
       ) : (
         <div className="space-y-4">
           {sections.map(section => {
             const styles = COULEUR_STYLES[section.couleur]
             return (
               <section
-                key={section.key}
+                key={section.titre}
                 className={`rounded-xl border ${styles.blockBorder} ${styles.blockBg} overflow-hidden`}
-                aria-label={`Groupes de l'atelier ${section.titre}`}
+                aria-label={`Groupes du type ${section.titre}`}
               >
-                {/* En-tête coloré */}
                 <header className={`${styles.headerBg} px-4 py-3 flex items-center justify-between gap-3 border-b ${styles.blockBorder}`}>
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${styles.dot}`}
-                      aria-hidden="true"
-                    />
-                    <h3 className={`text-sm font-semibold truncate ${styles.headerText}`}>
-                      {section.titre}
-                    </h3>
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${styles.dot}`} aria-hidden="true" />
+                    <h3 className={`text-sm font-semibold truncate ${styles.headerText}`}>{section.titre}</h3>
                   </div>
                   <span className={`text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-full bg-white/70 ${styles.headerText} shrink-0`}>
                     {section.groupes.length} groupe{section.groupes.length > 1 ? "s" : ""}
                   </span>
                 </header>
 
-                {/* Liste des groupes */}
                 <ul className="divide-y divide-white/60">
-                  {section.groupes.map(g => {
-                    const members = getMembers(g)
+                  {section.groupes.map(s => {
+                    const members = getMembers(s)
                     return (
                       <li
-                        key={g.id}
-                        onClick={() => onEdit(g)}
+                        key={s.id}
+                        onClick={() => onEdit(s)}
                         className="px-4 py-3 flex items-center gap-4 hover:bg-white/60 cursor-pointer group/row"
                       >
-                        {/* Nom + type */}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-foreground truncate">{g.nom}</p>
-                          <span className={`text-[10px] mt-0.5 inline-block px-1.5 py-0.5 rounded ${typeGroupeStyle[g.type]}`}>
-                            {g.type}
-                          </span>
+                          <p className="text-sm font-semibold text-foreground truncate">{s.groupe.trim() || "Groupe"}</p>
+                          {s.periode && <p className="text-[10px] text-muted mt-0.5">{s.periode}</p>}
                         </div>
 
-                        {/* Effectif */}
                         <div className="text-center shrink-0 w-12">
                           <p className="text-lg font-bold text-foreground tabular-nums leading-none">{members.length}</p>
                           <p className="text-[10px] text-muted uppercase tracking-wider mt-0.5">membre{members.length > 1 ? "s" : ""}</p>
                         </div>
 
-                        {/* Aperçu membres (avatars colorés à la couleur de l'atelier) */}
                         <div className="shrink-0 min-w-0 max-w-xs">
                           {members.length === 0 ? (
                             <span className="text-[11px] text-muted italic">Aucun membre</span>
                           ) : (
-                            <div className="flex items-center gap-2">
-                              <div className="flex -space-x-1.5">
-                                {members.slice(0, 5).map(b => (
-                                  <div
-                                    key={b.id}
-                                    title={`${b.prenom} ${b.nom}`}
-                                    className={`w-7 h-7 rounded-full ${styles.avatarBg} border-2 border-white flex items-center justify-center shrink-0`}
-                                  >
-                                    <span className={`text-[10px] font-bold ${styles.avatarText}`}>{initials(b.prenom, b.nom)}</span>
-                                  </div>
-                                ))}
-                                {members.length > 5 && (
-                                  <div className="w-7 h-7 rounded-full bg-white/80 border-2 border-white flex items-center justify-center shrink-0">
-                                    <span className="text-[10px] font-bold text-slate-600">+{members.length - 5}</span>
-                                  </div>
-                                )}
-                              </div>
+                            <div className="flex -space-x-1.5">
+                              {members.slice(0, 5).map(b => (
+                                <div
+                                  key={b.id}
+                                  title={`${b.prenom} ${b.nom}`}
+                                  className={`w-7 h-7 rounded-full ${styles.avatarBg} border-2 border-white flex items-center justify-center shrink-0`}
+                                >
+                                  <span className={`text-[10px] font-bold ${styles.avatarText}`}>{initials(b.prenom, b.nom)}</span>
+                                </div>
+                              ))}
+                              {members.length > 5 && (
+                                <div className="w-7 h-7 rounded-full bg-white/80 border-2 border-white flex items-center justify-center shrink-0">
+                                  <span className="text-[10px] font-bold text-slate-600">+{members.length - 5}</span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
 
-                        {/* Action éditer */}
                         <button
                           type="button"
-                          onClick={e => { e.stopPropagation(); onEdit(g) }}
+                          onClick={e => { e.stopPropagation(); onEdit(s) }}
                           className="p-1.5 rounded-lg hover:bg-white text-muted opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0"
                           aria-label="Modifier le groupe"
                         >
@@ -938,7 +1358,7 @@ export default function AteliersPage() {
   }, [toast])
 
   // ── Sessions ──
-  const [sessions, setSessions]         = useState<Session[]>(ateliersMock.sessions as Session[])
+  const [sessions, setSessions]         = useState<Session[]>([])
   const [sessionSlide, setSessionSlide] = useState(false)
   const [editingSession, setEditingSession] = useState<Session | null>(null)
   const [sessionForm, setSessionForm]   = useState<Omit<Session, "id">>(emptySession())
@@ -950,10 +1370,13 @@ export default function AteliersPage() {
   const [groupeForm, setGroupeForm]     = useState<Omit<Groupe, "id">>(emptyGroupe())
 
   // ── Bénéficiaires ──
-  const [beneficiaires, setBeneficiaires] = useState<Beneficiaire[]>(ateliersMock.beneficiaires as Beneficiaire[])
+  const [beneficiaires, setBeneficiaires] = useState<Beneficiaire[]>([])
 
   // ── Bénévoles (read-only) ──
   const benevoles = benevolesMock.liste
+
+  // ── Intervenants / animateurs (depuis le Sheet, table INTERVENANT) ──
+  const [intervenants, setIntervenants] = useState<IntervenantSheet[]>([])
 
   // ── Membres (liste éditable côté /membres, on lit depuis localStorage pour
   //    refléter les ajouts/modifs faits sur l'autre page) ──
@@ -964,14 +1387,34 @@ export default function AteliersPage() {
     setMembres(load<Membre[]>(S_MEMBRES, membresMock.liste as Membre[]))
   }
 
-  // Hydration from localStorage
+  // État de chargement des ateliers (lecture asynchrone depuis le Sheet).
+  const [loadingAteliers, setLoadingAteliers] = useState(true)
+  const [erreurAteliers, setErreurAteliers]   = useState<string | null>(null)
+
+  // Recharge la liste des ateliers depuis le Sheet (appelée au boot + après CRUD).
+  function reloadAteliers() {
+    setLoadingAteliers(true)
+    return fetch("/api/sheets?action=getAteliers")
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: AtelierSheet[]) => { setSessions(rows.map(atelierFromSheet)); setErreurAteliers(null) })
+      .catch((e: Error) => { setSessions([]); setErreurAteliers(e.message) })
+      .finally(() => setLoadingAteliers(false))
+  }
+
+  // Hydration
   useEffect(() => {
-    // Migration auto pour les sessions (champs FicheAtelier ajoutés au Lot 2).
-    const sessionsRaw = load<Session[]>(S_SESSIONS, ateliersMock.sessions as Session[])
-    setSessions(sessionsRaw.map(s => migrateFiche(s) as Session))
-    // Migration auto pour les bénéficiaires (note unique → 4 notes du Lot 1).
-    const benefsRaw = load<Beneficiaire[]>(S_BENEF, ateliersMock.beneficiaires as Beneficiaire[])
-    setBeneficiaires(benefsRaw.map(b => migrateBenef(b) as Beneficiaire))
+    // ── Ateliers : lecture depuis Google Sheets (table ATELIER).
+    reloadAteliers()
+    // ── Bénéficiaires : lecture depuis Google Sheets (PERSONNE/INSCRIPTION/EVALUATION) — étape 3b.
+    fetch("/api/sheets?action=getBeneficiaires")
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: BeneficiaireSheet[]) => setBeneficiaires(rows.map(beneficiaireFromSheet)))
+      .catch(() => setBeneficiaires([]))
+    // ── Intervenants : lecture depuis Google Sheets (table INTERVENANT) — étape 4a.
+    fetch("/api/sheets?action=getIntervenants")
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: IntervenantSheet[]) => setIntervenants(rows))
+      .catch(() => setIntervenants([]))
     // Migration auto des groupes : les anciens enregistrements n'ont pas de
     // champ atelierId, on le force à null pour qu'ils restent affichés dans
     // le sous-onglet Groupes mais pas attachés à un atelier.
@@ -999,40 +1442,66 @@ export default function AteliersPage() {
     setSessionForm({ ...s, beneficiaireIds: [...s.beneficiaireIds], benevoleIds: [...s.benevoleIds] })
     setSessionSlide(true)
   }
-  function handleSaveSession() {
-    const isNew = !editingSession
-    const id = editingSession ? editingSession.id : Date.now()
-    const nouvelle: Session = { ...sessionForm, id }
-    const updated = editingSession
-      ? sessions.map(x => x.id === id ? nouvelle : x)
-      : [...sessions, nouvelle]
-    persistSessions(updated); setSessionSlide(false)
-
-    // Auto-génération du brouillon de groupes pour un NOUVEL atelier qui a au
-    // moins une compétence cochée. Ça démarre le travail pour la collaboratrice
-    // sans qu'elle ait à aller cliquer sur "Générer" depuis l'onglet brouillon.
-    if (isNew && nouvelle.competencesCiblees.length > 0) {
-      // Filtre la pool à l'audience de l'atelier : un atelier enfants ne doit
-      // pas composer ses groupes à partir des parents (et inversement).
-      const expectedType: TypeBeneficiaire = nouvelle.audience === "parents" ? "parent" : "eleve"
-      const inputs: BeneficiairePourGroupage[] = beneficiaires
-        .filter(b => b.type === expectedType)
-        .map(b => ({
-          id: b.id, prenom: b.prenom, nom: b.nom,
-          dateNaissance: b.dateNaissance, statut: b.statut,
-          positionnementInitial: b.positionnementInitial,
-        }))
-      const brouillon = composerGroupes(nouvelle, inputs)
-      saveBrouillon(brouillon)
-      setToast({
-        message: `Brouillon généré : ${brouillon.groupes.length} groupe${brouillon.groupes.length > 1 ? "s" : ""} proposé${brouillon.groupes.length > 1 ? "s" : ""}.`,
-      })
+  /** Construit le payload d'écriture ATELIER (colonnes du Sheet) depuis le formulaire. */
+  function atelierPayload(f: Omit<Session, "id">) {
+    const parDispo = /th[eé][aâ]tre|marionnette/i.test(f.categorie)
+    return {
+      data: {
+        Categorie: f.categorie,
+        Groupe: f.groupe,
+        Titre: [f.categorie, f.groupe].filter(Boolean).join(" · ") || f.titre,
+        Audience: f.audience === "parents" ? "Parent" : "Eleve",
+        Date_Debut: f.date,
+        Date_Fin: f.audience === "parents" ? "" : f.dateFin,  // pas de date de fin côté parents
+        Periode: f.periode,
+        Heure_Debut: f.heure,
+        Heure_Fin: "",
+        Salle: f.salle,
+        // Parents & ateliers "classiques" → par notes ; théâtre/marionnettes → par disponibilité.
+        Mode_Groupage: f.audience !== "parents" && parDispo ? "disponibilite" : "notes",
+        Taille_Cible: f.tailleGroupeCible ?? "",
+        Ratio_Encadrement: f.ratioEncadrement ?? "",
+        Competences_Ciblees: f.competencesCiblees,
+        Taches: f.taches,
+        Besoins: f.besoins,
+        Etapes: f.etapes,
+        Statut: f.statut,
+      },
+      beneficiaireIds: f.beneficiaireIds,
+      intervenantIds: f.intervenantIds,
     }
   }
-  function handleDeleteSession() {
+  async function handleSaveSession() {
+    const payload = atelierPayload(sessionForm)
+    const body = editingSession
+      ? { action: "updateAtelier", idAtelier: String(editingSession.id), ...payload }
+      : { action: "addAtelier", ...payload }
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setSessionSlide(false)
+      await reloadAteliers()
+      setToast({ message: editingSession ? "Atelier mis à jour dans le Sheet." : "Atelier créé dans le Sheet." })
+    } catch {
+      setToast({ message: "Erreur : l'enregistrement dans le Sheet a échoué." })
+    }
+  }
+  async function handleDeleteSession() {
     if (!editingSession) return
-    persistSessions(sessions.filter(x => x.id !== editingSession.id))
-    setSessionSlide(false)
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteAtelier", idAtelier: String(editingSession.id) }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setSessionSlide(false)
+      await reloadAteliers()
+      setToast({ message: "Atelier supprimé du Sheet." })
+    } catch {
+      setToast({ message: "Erreur : la suppression a échoué." })
+    }
   }
   function toggleBenefInSession(id: number) {
     setSessionForm(f => ({
@@ -1048,6 +1517,14 @@ export default function AteliersPage() {
       benevoleIds: f.benevoleIds.includes(id)
         ? f.benevoleIds.filter(x => x !== id)
         : [...f.benevoleIds, id],
+    }))
+  }
+  function toggleIntervenantInSession(id: number) {
+    setSessionForm(f => ({
+      ...f,
+      intervenantIds: f.intervenantIds.includes(id)
+        ? f.intervenantIds.filter(x => x !== id)
+        : [...f.intervenantIds, id],
     }))
   }
   function toggleCompetence(t: Thematique) {
@@ -1144,7 +1621,7 @@ export default function AteliersPage() {
   // ── Derived stats (audience-aware) ──
   const aVenir         = sessionsForAudience.filter(s => s.statut === "planifié" || s.statut === "en cours").length
   const benefActifs    = benefsForAudience.filter(b => b.statut === "actif").length
-  const groupesCount   = groupesForAudience.length
+  const groupesCount   = sessionsForAudience.filter(s => s.beneficiaireIds.length > 0).length
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -1161,14 +1638,6 @@ export default function AteliersPage() {
               className="flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
             >
               <Plus size={14} /> Nouvel atelier
-            </button>
-          )}
-          {tab === "groupes" && (
-            <button
-              onClick={openNewGroupe}
-              className="flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
-            >
-              <Plus size={14} /> Nouveau groupe
             </button>
           )}
         </div>
@@ -1215,44 +1684,75 @@ export default function AteliersPage() {
 
       {/* Tab content */}
       {tab === "ateliers" && (
-        <AteliersTab
-          sessions={sessionsForAudience}
-          beneficiaires={beneficiaires}
-          benevoles={benevoles}
-          groupes={groupesForAudience}
-          onEdit={openEditSession}
-        />
+        loadingAteliers ? (
+          <p className="text-center text-sm text-muted py-12">Chargement des ateliers depuis Google Sheets…</p>
+        ) : erreurAteliers ? (
+          <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            Impossible de charger les ateliers depuis le Sheet ({erreurAteliers}).
+          </div>
+        ) : (
+          <AteliersTab
+            sessions={sessionsForAudience}
+            beneficiaires={beneficiaires}
+            benevoles={benevoles}
+            groupes={groupesForAudience}
+            onEdit={openEditSession}
+          />
+        )
       )}
       {tab === "groupes" && (
-        <GroupesTab
-          groupes={groupesForAudience}
-          beneficiaires={beneficiaires}
-          sessions={sessionsForAudience}
-          onEdit={openEditGroupe}
-        />
+        loadingAteliers ? (
+          <p className="text-center text-sm text-muted py-12">Chargement des groupes depuis Google Sheets…</p>
+        ) : (
+          <GroupesTab
+            sessions={sessionsForAudience}
+            beneficiaires={beneficiaires}
+            onEdit={openEditSession}
+          />
+        )
       )}
       {tab === "brouillon" && (
         <BrouillonGroupesTab
           sessions={sessionsForAudience}
           beneficiaires={benefsForAudience}
-          onGroupesValides={(nouveaux, atelierId) => {
-            // Remplace les groupes deja rattaches a cet atelier (atelierId
-            // identique) — sinon, revalider un brouillon dupliquerait les
-            // groupes. Garde tous les autres groupes (autres ateliers + ceux
-            // crees a la main avec atelierId null).
-            const sansAnciens = groupes.filter(g => g.atelierId !== atelierId)
-            persistGroupes([...sansAnciens, ...nouveaux])
+          onGroupesValides={async (nouveaux, atelierId) => {
+            // Modèle "1 ligne ATELIER = 1 groupe" : on matérialise chaque groupe
+            // composé en une nouvelle ligne ATELIER (même type/dates/compétences
+            // que l'atelier "type" d'origine), puis on supprime l'atelier "type".
+            const source = sessions.find(s => s.id === atelierId)
+            if (!source) return
+            try {
+              for (let i = 0; i < nouveaux.length; i++) {
+                const g = nouveaux[i]
+                const payload = atelierPayload({
+                  ...source,
+                  groupe: `Groupe ${i + 1}`,
+                  beneficiaireIds: g.beneficiaireIds,
+                })
+                const res = await fetch("/api/sheets", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "addAtelier", ...payload }),
+                })
+                if (!res.ok) throw new Error(`HTTP ${res.status}`)
+              }
+              // Supprime l'atelier "type" — remplacé par les lignes-groupes.
+              await fetch("/api/sheets", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "deleteAtelier", idAtelier: String(atelierId) }),
+              })
+              await reloadAteliers()
+              setToast({ message: `${nouveaux.length} groupe${nouveaux.length > 1 ? "s" : ""} créé${nouveaux.length > 1 ? "s" : ""} dans le Sheet.` })
+            } catch {
+              setToast({ message: "Erreur lors de la création des groupes dans le Sheet." })
+            }
           }}
-          onAtelierBenefsUpdated={(atelierId, benefIds) => {
-            // Met à jour la session source : sa liste de bénéficiaires reflète
-            // désormais la composition validée. Affiché dans le sous-onglet Ateliers.
-            persistSessions(sessions.map(s =>
-              s.id === atelierId ? { ...s, beneficiaireIds: benefIds } : s,
-            ))
+          onAtelierBenefsUpdated={() => {
+            // Plus nécessaire : l'atelier "type" est remplacé par les lignes-groupes
+            // (chacune porte ses propres bénéficiaires). Conservé pour la signature.
           }}
           onValidated={() => {
-            // Bascule sur l'onglet Groupes pour montrer immédiatement le résultat.
-            setTab("groupes")
+            // Bascule sur l'onglet Ateliers pour voir les lignes-groupes créées.
+            setTab("ateliers")
           }}
         />
       )}
@@ -1267,32 +1767,70 @@ export default function AteliersPage() {
         width="lg"
       >
         <form onSubmit={e => { e.preventDefault(); handleSaveSession() }} className="flex flex-col gap-4">
-          {/* ── Titre ── */}
-          <Field label="Titre" required>
-            <Input
-              placeholder="Ex : Atelier théâtre"
-              value={sessionForm.titre}
-              onChange={e => setSessionForm(f => ({ ...f, titre: e.target.value }))}
-            />
-          </Field>
-
-          {/* ── Date + horaires / lieu / encadrant ── */}
+          {/* ── Type d'atelier + groupe ── */}
           <FormRow>
-            <Field label="Date">
-              <Input
-                type="date"
-                value={sessionForm.date}
-                onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+            <Field label="Type d'atelier" required>
+              <CategorieField
+                audience={sessionForm.audience}
+                value={sessionForm.categorie}
+                onChange={c => setSessionForm(f => ({ ...f, categorie: c }))}
               />
             </Field>
-            <Field label="Heure">
+            <Field label="Groupe / niveau">
               <Input
-                placeholder="14h00"
-                value={sessionForm.heure}
-                onChange={e => setSessionForm(f => ({ ...f, heure: e.target.value }))}
+                placeholder="Ex : A1"
+                value={sessionForm.groupe}
+                onChange={e => setSessionForm(f => ({ ...f, groupe: e.target.value }))}
               />
             </Field>
           </FormRow>
+
+          {/* ── Dates — élèves : début + fin (atelier sur plusieurs jours) ;
+              parents : date unique (séance ponctuelle). ── */}
+          {sessionForm.audience === "parents" ? (
+            <FormRow>
+              <Field label="Date">
+                <Input
+                  type="date"
+                  value={sessionForm.date}
+                  onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+                />
+              </Field>
+              <Field label="Heure">
+                <Input
+                  placeholder="14h00"
+                  value={sessionForm.heure}
+                  onChange={e => setSessionForm(f => ({ ...f, heure: e.target.value }))}
+                />
+              </Field>
+            </FormRow>
+          ) : (
+            <>
+              <FormRow>
+                <Field label="Date de début">
+                  <Input
+                    type="date"
+                    value={sessionForm.date}
+                    onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Date de fin">
+                  <Input
+                    type="date"
+                    value={sessionForm.dateFin}
+                    onChange={e => setSessionForm(f => ({ ...f, dateFin: e.target.value }))}
+                  />
+                </Field>
+              </FormRow>
+              <Field label="Heure">
+                <Input
+                  placeholder="14h00"
+                  value={sessionForm.heure}
+                  onChange={e => setSessionForm(f => ({ ...f, heure: e.target.value }))}
+                />
+              </Field>
+            </>
+          )}
           <FormRow>
             <Field label="Durée">
               <Input
@@ -1481,128 +2019,55 @@ export default function AteliersPage() {
                   ordered
                 />
               </Field>
-              <Field label="Personnes impliquées (formatrices / coordinatrices)">
-                <div className="flex flex-wrap gap-2">
-                  {/* On exclut les bénévoles : ils ont leur propre section ci-dessous,
-                      avec leurs compétences spécifiques. Éviter le doublon. */}
-                  {membres
-                    .filter(m => m.role !== "benevole")
-                    .map(m => {
-                      const sel = sessionForm.personnesImpliqueesIds.includes(m.id)
-                      return (
-                        <button
-                          type="button"
-                          key={m.id}
-                          onClick={() => togglePersonne(m.id)}
-                          className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                            sel
-                              ? "bg-communication text-white border-communication"
-                              : "bg-surface text-muted border-border hover:border-communication"
-                          }`}
-                        >
-                          {m.prenom} {m.nom}
-                          <span className="ml-1 opacity-60">· {m.role}</span>
-                        </button>
-                      )
-                    })}
-                  {membres.filter(m => m.role !== "benevole").length === 0 && (
-                    <p className="text-[11px] text-muted italic">
-                      Aucune formatrice / coordinatrice enregistrée. Ajoute-les dans l&apos;onglet Membres.
-                    </p>
-                  )}
-                </div>
-              </Field>
             </div>
           </div>
 
-          {/* Bénévoles — multi-select */}
-          <Field label="Bénévoles">
-            <div className="flex flex-wrap gap-2">
-              {benevoles.map(bv => {
-                const sel = sessionForm.benevoleIds.includes(bv.id)
-                return (
-                  <button
-                    type="button"
-                    key={bv.id}
-                    onClick={() => toggleBenevoleInSession(bv.id)}
-                    className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                      sel
-                        ? "bg-benevoles text-white border-benevoles"
-                        : "bg-surface text-muted border-border hover:border-benevoles"
-                    }`}
-                  >
-                    {bv.nom}
-                    {bv.competences.length > 0 && (
-                      <span className="ml-1 opacity-60">· {bv.competences.join(", ")}</span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+          {/* Intervenants / animateurs — sélecteur compact recherchable (table INTERVENANT
+              du Sheet). Remplace les anciennes sections « Bénévoles » et « Personnes
+              impliquées ». Champ commun aux deux audiences (onglet Parents / onglet Enfants) :
+              il n'est pas conditionné par sessionForm.audience. */}
+          <Field label="Intervenants / animateurs">
+            {intervenants.length === 0 ? (
+              <p className="text-[11px] text-muted italic">
+                Aucun intervenant enregistré. Ajoute-les dans l&apos;onglet INTERVENANT du Google Sheet.
+              </p>
+            ) : (
+              <SelecteurIntervenants
+                options={intervenants}
+                selectedIds={sessionForm.intervenantIds}
+                onToggle={toggleIntervenantInSession}
+                placeholder="Sélectionner des intervenants…"
+              />
+            )}
           </Field>
 
-          {/* Bénéficiaires — multi-select. Filtré par audience de la session :
-              ateliers enfants → uniquement élèves ; ateliers parents → uniquement parents. */}
-          {(() => {
-            const expectedType: TypeBeneficiaire = sessionForm.audience === "parents" ? "parent" : "eleve"
-            const benefsFiltres = beneficiaires.filter(b => b.type === expectedType)
-            // Groupes importables : ceux dont l'atelier d'origine a la même audience.
-            // Groupes manuels (atelierId=null) : on les inclut s'ils contiennent
-            // au moins un membre du bon type — sinon ils n'ont rien à faire ici.
-            const groupesImportables = groupes.filter(g => {
-              if (g.atelierId === null) {
-                return g.beneficiaireIds.some(id => {
-                  const b = beneficiaires.find(x => x.id === id)
-                  return b?.type === expectedType
-                })
-              }
-              const at = sessions.find(s => s.id === g.atelierId)
-              return at ? at.audience === sessionForm.audience : false
+          {/* Élèves — UNIQUEMENT pour théâtre / marionnettes : sélection manuelle
+              (par disponibilité, gérée hors appli). Liste pré-filtrée par niveau
+              d'école selon le type. Pour les autres types, la composition se fait
+              dans l'onglet « Brouillon groupes ». */}
+          {/th[eé][aâ]tre|marionnette/i.test(sessionForm.categorie) && sessionForm.audience !== "parents" && (() => {
+            const estMarionnettes = /marionnette/i.test(sessionForm.categorie)
+            const niveauxOk: (ReturnType<typeof niveauEcole>)[] = estMarionnettes
+              ? ["elementaire", "6e"]
+              : ["college", "lycee", "6e"]
+            const pool = beneficiaires.filter(b => {
+              if (b.type !== "eleve") return false
+              const n = niveauEcole(b.niveauClasse)
+              return n === null || niveauxOk.includes(n)   // classe inconnue → laissée dispo
             })
-            const labelBenef = sessionForm.audience === "parents" ? "Bénéficiaires (parents)" : "Bénéficiaires (élèves)"
             return (
-              <Field label={labelBenef}>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {benefsFiltres.length === 0 ? (
-                    <p className="text-[11px] text-muted italic">
-                      Aucun {expectedType === "parent" ? "parent" : "élève"} enregistré. Ajoute-en depuis la page Bénéficiaires.
-                    </p>
-                  ) : benefsFiltres.map(b => {
-                    const sel = sessionForm.beneficiaireIds.includes(b.id)
-                    return (
-                      <button
-                        type="button"
-                        key={b.id}
-                        onClick={() => toggleBenefInSession(b.id)}
-                        className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                          sel
-                            ? "bg-ateliers text-white border-ateliers"
-                            : "bg-surface text-muted border-border hover:border-ateliers"
-                        }`}
-                      >
-                        {b.prenom} {b.nom}
-                      </button>
-                    )
-                  })}
-                </div>
-                {/* Import groupe — filtré par audience */}
-                {groupesImportables.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <p className="text-[10px] font-semibold text-muted uppercase tracking-wider mb-2">Importer un groupe</p>
-                    <div className="flex flex-wrap gap-2">
-                      {groupesImportables.map(g => (
-                        <button
-                          type="button"
-                          key={g.id}
-                          onClick={() => importGroupeIntoSession(g.id)}
-                          className="text-xs px-3 py-1.5 rounded-full border font-medium border-ateliers/40 text-ateliers-dark hover:bg-ateliers-light transition-colors"
-                        >
-                          + {g.nom}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <Field label="Élèves">
+                <p className="text-[11px] text-muted mb-2">
+                  {estMarionnettes
+                    ? "Marionnettes : élèves d'élémentaire (CP→CM2) et 6e."
+                    : "Théâtre : collégiens (5e→3e), lycéens, et 6e (facultatif)."}
+                </p>
+                <SelecteurBeneficiaires
+                  options={pool}
+                  selectedIds={sessionForm.beneficiaireIds}
+                  onToggle={toggleBenefInSession}
+                  placeholder="Sélectionner des élèves…"
+                />
               </Field>
             )
           })()}
@@ -1692,20 +2157,18 @@ export default function AteliersPage() {
         </form>
       </SlideOver>
 
-      {/* Toast — brouillon généré automatiquement */}
+      {/* Toast — confirmation d'action (création / mise à jour / suppression) */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-amber-500 text-white rounded-xl shadow-2xl px-5 py-4 flex items-center gap-3 max-w-md animate-in slide-in-from-bottom-2">
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white rounded-xl shadow-2xl px-5 py-4 flex items-center gap-3 max-w-md animate-in slide-in-from-bottom-2">
           <Sparkles size={18} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold">Brouillon de groupes prêt</p>
-            <p className="text-xs opacity-90">{toast.message}</p>
-          </div>
+          <p className="text-sm font-medium flex-1 min-w-0">{toast.message}</p>
           <button
             type="button"
-            onClick={() => { setTab("brouillon"); setToast(null) }}
-            className="text-xs font-semibold bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg whitespace-nowrap"
+            onClick={() => setToast(null)}
+            className="text-xs font-semibold bg-white/20 hover:bg-white/30 px-2 py-1 rounded-lg"
+            aria-label="Fermer"
           >
-            Voir →
+            <X size={13} />
           </button>
         </div>
       )}

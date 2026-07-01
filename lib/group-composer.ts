@@ -22,7 +22,7 @@
 
 import type { Thematique, NotesPositionnement } from "./positionnement"
 import type { FicheAtelier } from "./atelier"
-import { TRANCHES_AGE, trancheFor, encadrantsRequis, type TrancheAge } from "./atelier"
+import { encadrantsRequis, cycleForClasse, CYCLES, type CycleScolaire } from "./atelier"
 
 // ──────────────────────────────────────────────
 // Types publics
@@ -35,13 +35,18 @@ export interface BeneficiairePourGroupage {
   dateNaissance: string
   statut: string
   positionnementInitial: NotesPositionnement
+  /** Classe scolaire (INSCRIPTION "Niveau / Classe") — sert au cycle scolaire. */
+  niveauClasse?: string
+  /** Créneau de disponibilité (INSCRIPTION "Disponibilite") — mode "disponibilite". */
+  disponibilite?: string
 }
 
 export interface GroupeBrouillon {
   /** Identifiant local (string pour éviter les collisions avec les ids existants). */
   id: string
   nom: string
-  tranche: TrancheAge | null
+  /** Cycle scolaire du groupe (null pour les parents / hors cycle). */
+  cycle: CycleScolaire | null
   beneficiaireIds: number[]
   /** Encadrants requis selon le ratio de l'atelier — null si pas de ratio défini. */
   encadrantsRequis: number | null
@@ -170,6 +175,19 @@ function moyenneSur(
   return notes.reduce((a, b) => a + b, 0) / notes.length
 }
 
+/** Regroupe un lot par créneau de disponibilité (mode "disponibilite"). */
+function grouperParDispo(
+  lot: BeneficiairePourGroupage[],
+): { key: string; membres: BeneficiairePourGroupage[] }[] {
+  const map = new Map<string, BeneficiairePourGroupage[]>()
+  for (const b of lot) {
+    const key = (b.disponibilite ?? "").trim() || "Sans créneau"
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(b)
+  }
+  return [...map.entries()].map(([key, membres]) => ({ key, membres }))
+}
+
 // ──────────────────────────────────────────────
 // API publique
 // ──────────────────────────────────────────────
@@ -177,15 +195,16 @@ function moyenneSur(
 export function composerGroupes(
   atelier: Pick<
     FicheAtelier,
-    "audience" | "competencesCiblees" | "ageMin" | "ageMax" | "tailleGroupeCible" | "ratioEncadrement" | "mixerNiveaux"
+    "audience" | "competencesCiblees" | "ageMin" | "ageMax" | "tailleGroupeCible" | "ratioEncadrement" | "mixerNiveaux" | "modeGroupage"
   > & { id: number; titre: string },
   beneficiaires: BeneficiairePourGroupage[],
   options: OptionsComposition = {},
 ): Brouillon {
-  // Pour les ateliers parents, on ignore complètement la notion d'âge :
-  // pas de filtre tranche, pas de regroupement par tranche, juste un tri
-  // par notes. Décision projet : les adultes n'ont pas de "tranche".
+  // Parents : pas de cycle scolaire (les adultes n'ont pas de niveau de classe).
   const ignoreAge = atelier.audience === "parents"
+  // Mode "disponibilite" (théâtre / marionnettes) : on regroupe par créneau,
+  // sans notes ni compétences. Sinon "notes" : par niveau + cycle scolaire.
+  const modeDispo = atelier.modeGroupage === "disponibilite"
   // Ordonner les thématiques cochées selon le poids (principales d'abord).
   // Cet ordre détermine la priorité du tri lexicographique : la note sur la
   // thématique principale a le plus de poids dans le placement.
@@ -196,7 +215,8 @@ export function composerGroupes(
   const erreurs: string[] = []
 
   // ── 1. Validation des paramètres ──
-  if (dims.length === 0) {
+  // En mode "disponibilite", les compétences ne sont pas requises (pas de notes).
+  if (!modeDispo && dims.length === 0) {
     erreurs.push(
       "Aucune compétence ciblée n'est cochée pour cet atelier. Cochez au moins une thématique du test de positionnement pour que l'algorithme puisse comparer les notes.",
     )
@@ -230,19 +250,20 @@ export function composerGroupes(
       horsTranche.push(b.id)
       continue
     }
-    if (dims.length > 0 && !aAuMoinsUneNote(b, dims)) {
-      aEvaluer.push(b.id)
-      continue
-    }
-    // Filtre outliers : si un seuil bas/haut est défini, on calcule la moyenne
-    // du bénéficiaire sur les thématiques ciblées et on l'écarte du groupage
-    // s'il dépasse les bornes. La moyenne ne sert qu'à ce filtre, pas au tri.
-    if (noteMin !== null || noteMax !== null) {
-      const moy = moyenneSur(b, dims)
-      if (moy !== null) {
-        if ((noteMin !== null && moy < noteMin) || (noteMax !== null && moy > noteMax)) {
-          outliers.push(b.id)
-          continue
+    // En mode "notes" seulement : exiger au moins une note + filtrer les outliers.
+    if (!modeDispo) {
+      if (dims.length > 0 && !aAuMoinsUneNote(b, dims)) {
+        aEvaluer.push(b.id)
+        continue
+      }
+      // Filtre outliers : moyenne hors des bornes → bucket à part.
+      if (noteMin !== null || noteMax !== null) {
+        const moy = moyenneSur(b, dims)
+        if (moy !== null) {
+          if ((noteMin !== null && moy < noteMin) || (noteMax !== null && moy > noteMax)) {
+            outliers.push(b.id)
+            continue
+          }
         }
       }
     }
@@ -270,67 +291,65 @@ export function composerGroupes(
     }
   }
 
-  // ── 3. Regroupement par tranche d'âge (barrière dure) ──
-  // Pour les ateliers parents (audience=parents), on saute cette étape : un
-  // seul lot trié par notes, aucune notion de tranche.
-  // Pour les enfants : on regroupe par tranche pour produire des noms et stats
-  // par tranche si l'atelier accepte une plage qui chevauche plusieurs tranches.
+  // ── 3. Regroupement ──
+  // • Élèves : barrière dure de CYCLE scolaire (primaire+6e / collège+lycée),
+  //   puis à l'intérieur de chaque cycle, découpe par notes OU par disponibilité.
+  // • Parents : un seul lot (pas de cycle), découpé par notes OU disponibilité.
   const groupes: GroupeBrouillon[] = []
   let groupeIndex = 1
 
-  if (ignoreAge) {
-    // Mode adultes : un seul lot trié par notes, puis slice/round-robin.
-    const trie = [...eligibles].sort((a, b) =>
-      compareLex(vecteurNotes(a, dims), vecteurNotes(b, dims)),
-    )
-    const nGroupes = Math.max(1, Math.ceil(trie.length / taille))
-    const repartition = atelier.mixerNiveaux
-      ? repartirRoundRobin(trie, nGroupes)
-      : sliceEnGroupes(trie, nGroupes)
-    repartition.forEach((membres, i) => {
-      groupes.push({
-        id: `${atelier.id}-adultes-${i + 1}`,
-        nom: `${atelier.titre} · Groupe ${groupeIndex++}`,
-        tranche: null,
-        beneficiaireIds: membres.map(m => m.id),
-        encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, membres.length),
-      })
-    })
-  } else {
-    const parTranche = new Map<TrancheAge | "hors", BeneficiairePourGroupage[]>()
-    for (const b of eligibles) {
-      const age = ageOf(b.dateNaissance)
-      const tr  = trancheFor(age) ?? "hors"
-      if (!parTranche.has(tr)) parTranche.set(tr, [])
-      parTranche.get(tr)!.push(b)
-    }
-
-    for (const tranche of [...TRANCHES_AGE.map(t => t.key), "hors" as const]) {
-      const lot = parTranche.get(tranche) ?? []
-      if (lot.length === 0) continue
-
-      // Tri lexicographique sur les thématiques ciblées (descendant)
-      const trie = [...lot].sort((a, b) =>
-        compareLex(vecteurNotes(a, dims), vecteurNotes(b, dims)),
-      )
-
+  /** Découpe un lot déjà homogène en cycle, selon le mode de groupage. */
+  function pousserLot(lot: BeneficiairePourGroupage[], cycle: CycleScolaire | null, cycleLabel: string) {
+    const prefixe = cycleLabel ? `${atelier.titre} · ${cycleLabel}` : atelier.titre
+    if (modeDispo) {
+      // Un groupe par créneau de disponibilité.
+      for (const { key, membres } of grouperParDispo(lot)) {
+        groupes.push({
+          id: `${atelier.id}-${cycle ?? "x"}-${groupeIndex}`,
+          nom: `${prefixe} · ${key}`,
+          cycle,
+          beneficiaireIds: membres.map(m => m.id),
+          encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, membres.length),
+        })
+        groupeIndex++
+      }
+    } else {
+      // Tri par notes puis découpe homogène (ou round-robin si hétérogène).
+      const trie = [...lot].sort((a, b) => compareLex(vecteurNotes(a, dims), vecteurNotes(b, dims)))
       const nGroupes = Math.max(1, Math.ceil(trie.length / taille))
       const repartition = atelier.mixerNiveaux
         ? repartirRoundRobin(trie, nGroupes)
         : sliceEnGroupes(trie, nGroupes)
-
-      repartition.forEach((membres, i) => {
-        const trancheLabel = tranche === "hors"
-          ? "hors tranche"
-          : TRANCHES_AGE.find(t => t.key === tranche)?.label ?? tranche
+      repartition.forEach(membres => {
         groupes.push({
-          id: `${atelier.id}-${tranche}-${i + 1}`,
-          nom: `${atelier.titre} · ${trancheLabel} · Groupe ${groupeIndex++}`,
-          tranche: tranche === "hors" ? null : tranche,
+          id: `${atelier.id}-${cycle ?? "x"}-${groupeIndex}`,
+          nom: `${prefixe} · Groupe ${groupeIndex}`,
+          cycle,
           beneficiaireIds: membres.map(m => m.id),
           encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, membres.length),
         })
+        groupeIndex++
       })
+    }
+  }
+
+  if (ignoreAge) {
+    // Parents : pas de cycle.
+    pousserLot(eligibles, null, "")
+  } else {
+    // Élèves : on répartit d'abord par cycle scolaire (barrière dure).
+    const parCycle = new Map<CycleScolaire | "hors", BeneficiairePourGroupage[]>()
+    for (const b of eligibles) {
+      const age = ageOf(b.dateNaissance)
+      const cy = cycleForClasse(b.niveauClasse, age) ?? "hors"
+      if (!parCycle.has(cy)) parCycle.set(cy, [])
+      parCycle.get(cy)!.push(b)
+    }
+    for (const cy of [...CYCLES.map(c => c.key), "hors" as const]) {
+      const lot = parCycle.get(cy) ?? []
+      if (lot.length === 0) continue
+      const label = cy === "hors" ? "Hors cycle" : (CYCLES.find(c => c.key === cy)?.label ?? cy)
+      pousserLot(lot, cy === "hors" ? null : cy, label)
     }
   }
 
