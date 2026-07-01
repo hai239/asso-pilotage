@@ -308,7 +308,7 @@ export default function ComptePage() {
           onDeleted={logout}
         />
 
-        {user.role === "admin" && (
+        {(user.role === "admin" || user.role === "super_admin") && (
           <section>
             <div className="flex items-center gap-2 mb-5">
               <ShieldCheck size={18} className="text-red-600" />
