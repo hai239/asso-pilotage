@@ -5,12 +5,13 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import SlideOver, { Field, Input, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 import JournalSuivi from "@/components/JournalSuivi"
-import { ChevronRight, Phone, Mail, Globe, Plus, Pencil, Upload, FileText, ExternalLink, X } from "lucide-react"
+import DateInput from "@/components/DateInput"
+import { ChevronRight, Plus, Pencil, Upload, FileText, ExternalLink, X } from "lucide-react"
 import {
   fetchFamilles, fetchMembre, updateMembre, deleteMembre, fetchPaiements,
   addPaiement, updatePaiement, deletePaiement, updateInscription, uploadFichier,
   fetchDocuments, deleteDocument,
-  calculerAge, type FamilleSheet, type MembreSheet, type PaiementSheet, type InscriptionSheet, type DocumentJoint
+  type FamilleSheet, type MembreSheet, type PaiementSheet, type InscriptionSheet, type DocumentJoint
 } from "@/lib/sheets-api"
 
 function fileToBase64(file: File): Promise<string> {
@@ -20,6 +21,32 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// Extrait jour/mois/année d'une date au format ISO (AAAA-MM-JJ) ou FR (JJ/MM/AAAA)
+function partsDate(v?: string | null): { d: number; m: number; y: number } | null {
+  if (!v) return null
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v))
+  if (iso) return { y: +iso[1], m: +iso[2], d: +iso[3] }
+  const fr = String(v).split("/")
+  if (fr.length === 3) { const d = +fr[0], m = +fr[1], y = +fr[2]; if (d && m && y) return { d, m, y } }
+  return null
+}
+
+function dateFrLisible(v?: string | null): string {
+  const p = partsDate(v)
+  if (!p) return v ? String(v) : ""
+  return `${String(p.d).padStart(2, "0")}/${String(p.m).padStart(2, "0")}/${p.y}`
+}
+
+function ageDepuis(v?: string | null): number | null {
+  const p = partsDate(v)
+  if (!p) return null
+  const t = new Date()
+  let age = t.getFullYear() - p.y
+  const mm = t.getMonth() - (p.m - 1)
+  if (mm < 0 || (mm === 0 && t.getDate() < p.d)) age--
+  return age >= 0 ? age : null
 }
 
 // Types de documents (chacun rangé dans son dossier Drive — mapping à venir)
@@ -185,7 +212,25 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
   }
 
   const statut = membre.Statut_Inscription?.toString().toUpperCase() ?? ""
-  const age = membre.Date_Naissance ? calculerAge(String(membre.Date_Naissance)) : null
+  const age = ageDepuis(membre.Date_Naissance)
+
+  // Champs de la carte infos (ordre logique ; seuls les renseignés s'affichent)
+  const naissance = dateFrLisible(membre.Date_Naissance)
+  const champsInfos: { label: string; value: string }[] = [
+    { label: "Téléphone", value: String(membre.Telephone || "") },
+    { label: "WhatsApp", value: membre.WhatsApp && membre.WhatsApp !== membre.Telephone ? String(membre.WhatsApp) : "" },
+    { label: "Email", value: String(membre.Email || "") },
+    { label: "Date de naissance", value: naissance ? (age !== null ? `${naissance} · ${age} ans` : naissance) : "" },
+    { label: "Genre", value: String(membre.Genre || "") },
+    { label: "Pays d'origine", value: String(membre.Pays_Origine || "") },
+    { label: "Langue maternelle", value: String(membre.Langue_Maternelle || "") },
+    { label: "Nb. enfants accompagnants", value: membre.Nb_Enfants ? String(membre.Nb_Enfants) : "" },
+    { label: "Adresse", value: String(famille?.Adresse_Complete || famille?.Adresse || "") },
+    { label: "Contact principal", value: membre.Contact_Principal ? String(membre.Contact_Principal) : "" },
+    { label: "Source d'orientation", value: String(membre.Source_Orientation || "") },
+    { label: "Droit à l'image", value: membre.Droit_Image ? String(membre.Droit_Image) : "" },
+    { label: "Charte d'engagement", value: membre.Charte ? String(membre.Charte) : "" },
+  ].filter(c => c.value !== "")
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -266,58 +311,21 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
       </SlideOver>
 
       {/* Carte infos */}
-      <div className="bg-surface border border-border rounded-xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
-
-        {(membre.Telephone || membre.WhatsApp) && (
-          <div className="flex items-start gap-2">
-            <Phone size={15} className="text-muted mt-0.5 shrink-0" />
-            <div className="space-y-2">
-              <InfoRow label="Téléphone" value={String(membre.Telephone || "")} />
-              {membre.WhatsApp && membre.WhatsApp !== membre.Telephone && (
-                <InfoRow label="WhatsApp" value={String(membre.WhatsApp)} />
-              )}
-            </div>
-          </div>
-        )}
-
-        {membre.Email && (
-          <div className="flex items-start gap-2">
-            <Mail size={15} className="text-muted mt-0.5 shrink-0" />
-            <InfoRow label="Email" value={String(membre.Email)} />
-          </div>
-        )}
-
-        {(membre.Pays_Origine || membre.Langue_Maternelle) && (
-          <div className="flex items-start gap-2">
-            <Globe size={15} className="text-muted mt-0.5 shrink-0" />
-            <div className="space-y-2">
-              <InfoRow label="Pays d'origine" value={String(membre.Pays_Origine || "")} />
-              <InfoRow label="Langue maternelle" value={String(membre.Langue_Maternelle || "")} />
-            </div>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <InfoRow label="Genre" value={String(membre.Genre || "")} />
-          <InfoRow label="Date de naissance" value={String(membre.Date_Naissance || "")} />
-          {age !== null && <InfoRow label="Âge" value={`${age} ans`} />}
-          <InfoRow label="Nb. enfants accompagnants" value={membre.Nb_Enfants ? String(membre.Nb_Enfants) : null} />
-        </div>
-
-        <div className="space-y-2">
-          <InfoRow label="Source d'orientation" value={String(membre.Source_Orientation || "")} />
+      <div className="bg-surface border border-border rounded-xl p-5 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+          {champsInfos.map(c => (
+            <InfoRow key={c.label} label={c.label} value={c.value} />
+          ))}
         </div>
       </div>
 
-      {/* Documents */}
-      <div className="bg-surface border border-border rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-semibold text-foreground mb-3">
-          Documents
-          {documents.length > 0 && <span className="ml-2 text-xs font-normal text-muted">({documents.length})</span>}
-        </h2>
-        {documents.length === 0 ? (
-          <p className="text-sm text-muted italic">Aucun document. Cliquez sur « Ajouter un document » en haut pour en ajouter.</p>
-        ) : (
+      {/* Documents — affiché uniquement s'il y en a */}
+      {documents.length > 0 && (
+        <div className="bg-surface border border-border rounded-xl p-5 mb-6">
+          <h2 className="text-sm font-semibold text-foreground mb-3">
+            Documents
+            <span className="ml-2 text-xs font-normal text-muted">({documents.length})</span>
+          </h2>
           <ul className="space-y-2">
             {documents.map(doc => (
               <li key={doc.ID_Doc} className="flex items-center justify-between gap-3 bg-slate-50 rounded-lg px-4 py-2.5">
@@ -334,8 +342,8 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               </li>
             ))}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Journal : commentaires + appels + emails */}
       <JournalSuivi notes={membre.Notes} onSave={handleSaveNotes} />
@@ -377,8 +385,6 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-1.5 text-xs text-muted flex-wrap">
-                    <span>Payé <span className="font-medium text-foreground">{paye} €</span></span>
-                    <span>·</span>
                     {enEdition ? (
                       <span className="flex items-center gap-1.5">
                         Attendu
@@ -405,6 +411,33 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
           </div>
         )}
 
+        {/* Liste des paiements (modifiable) */}
+        {paiements.length > 0 && (
+          <div className="space-y-2">
+            {paiements.map(p => (
+              <div key={p.ID_Paiement} className="flex items-center justify-between gap-3 bg-slate-50 rounded-lg px-4 py-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-sm font-bold text-familles-dark shrink-0">
+                    {p.Montant ? `${p.Montant} €` : "—"}
+                  </span>
+                  {p.Mode_Paiement && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-familles-light text-familles-dark">
+                      {p.Mode_Paiement}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <p className="text-sm font-medium text-foreground">{p.Date_Paiement || "—"}</p>
+                  <button onClick={() => openEditPaiement(p)} aria-label="Modifier ce paiement" title="Modifier"
+                    className="p-1.5 rounded-lg text-muted hover:text-familles-dark hover:bg-familles-light transition-colors">
+                    <Pencil size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {inscriptions.length === 0 && (
           <p className="text-sm text-muted italic">Aucune inscription : impossible d'ajouter un paiement.</p>
         )}
@@ -427,7 +460,7 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <Input type="number" value={String(payForm.Montant ?? "")} onChange={e => setPayForm(f => ({ ...f, Montant: e.target.value }))} />
             </Field>
             <Field label="Date de paiement">
-              <Input placeholder="JJ/MM/AAAA" value={String(payForm.Date_Paiement ?? "")} onChange={e => setPayForm(f => ({ ...f, Date_Paiement: e.target.value }))} />
+              <DateInput value={payForm.Date_Paiement != null ? String(payForm.Date_Paiement) : ""} onChange={v => setPayForm(f => ({ ...f, Date_Paiement: v }))} />
             </Field>
           </FormRow>
           <Field label="Mode de paiement">
@@ -484,7 +517,7 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             </Field>
           </FormRow>
           <Field label="Date de naissance">
-            <Input placeholder="JJ/MM/AAAA" value={String(form.Date_Naissance ?? "")} onChange={e => setForm(f => ({ ...f, Date_Naissance: e.target.value }))} />
+            <DateInput value={form.Date_Naissance != null ? String(form.Date_Naissance) : ""} onChange={v => setForm(f => ({ ...f, Date_Naissance: v }))} />
           </Field>
           <FormRow>
             <Field label="Niveau">
@@ -506,6 +539,9 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               </Select>
             </Field>
           </FormRow>
+          <Field label="Date d'inscription">
+            <DateInput value={form.Date_Inscription != null ? String(form.Date_Inscription) : ""} onChange={v => setForm(f => ({ ...f, Date_Inscription: v }))} />
+          </Field>
           <SaveButton />
           <DeleteButton onClick={handleDelete} />
         </form>

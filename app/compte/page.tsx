@@ -1,56 +1,46 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
+import { ROLE_LABELS, type AuthUser, type Role } from "@/lib/auth"
 import {
-  updateUser, deleteUser, getAllUsers, register,
-  ROLE_LABELS, type AuthUser, type Role,
-} from "@/lib/auth"
+  updateOwnProfile, updateOwnPassword,
+  fetchAllUsers, adminCreateUser, adminUpdateUser, adminDeleteUser,
+} from "@/lib/auth-client"
 import SlideOver, { Field, Input, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
-import { UserCircle, Plus, Pencil, AlertTriangle, ShieldCheck } from "lucide-react"
+import { UserCircle, Plus, Pencil, ShieldCheck } from "lucide-react"
 
 // ──────────────────────────────────────────────
 // Formulaire profil (section Mon profil)
 // ──────────────────────────────────────────────
-function ProfilSection({ user, onUpdated, onDeleted }: {
+function ProfilSection({ user, onUpdated }: {
   user: AuthUser
   onUpdated: () => void
-  onDeleted: () => void
 }) {
-  const router = useRouter()
   const [form, setForm] = useState({ prenom: user.prenom, nom: user.nom, email: user.email })
   const [pwdForm, setPwdForm] = useState({ newPwd: "", confirmPwd: "" })
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
-  function handleSaveProfil(e: React.FormEvent) {
+  async function handleSaveProfil(e: React.FormEvent) {
     e.preventDefault()
     setError(""); setSuccess("")
-    const res = updateUser(user.id, { prenom: form.prenom, nom: form.nom, email: form.email })
+    const res = await updateOwnProfile({ prenom: form.prenom, nom: form.nom, email: form.email })
     if (!res.ok) { setError(res.error ?? "Erreur."); return }
     setSuccess("Profil mis à jour.")
     onUpdated()
   }
 
-  function handleChangePwd(e: React.FormEvent) {
+  async function handleChangePwd(e: React.FormEvent) {
     e.preventDefault()
     setError(""); setSuccess("")
     if (!pwdForm.newPwd) { setError("Nouveau mot de passe requis."); return }
     if (pwdForm.newPwd !== pwdForm.confirmPwd) { setError("Les mots de passe ne correspondent pas."); return }
     if (pwdForm.newPwd.length < 6) { setError("Minimum 6 caractères."); return }
-    const res = updateUser(user.id, { password: pwdForm.newPwd })
+    const res = await updateOwnPassword(pwdForm.newPwd)
     if (!res.ok) { setError(res.error ?? "Erreur."); return }
     setPwdForm({ newPwd: "", confirmPwd: "" })
     setSuccess("Mot de passe modifié.")
-  }
-
-  function handleDelete() {
-    const res = deleteUser(user.id)
-    if (!res.ok) { setError(res.error ?? "Erreur."); return }
-    onDeleted()
-    router.replace("/login")
   }
 
   return (
@@ -110,29 +100,6 @@ function ProfilSection({ user, onUpdated, onDeleted }: {
           </button>
         </form>
       </div>
-
-      {/* Zone dangereuse */}
-      <div className="bg-red-50 border border-alert/20 rounded-2xl p-5">
-        <h3 className="text-sm font-semibold text-alert mb-1 flex items-center gap-1.5">
-          <AlertTriangle size={14} /> Zone dangereuse
-        </h3>
-        <p className="text-xs text-muted mb-4">La suppression de votre compte est irréversible. Toutes vos données seront perdues.</p>
-        {!confirmDelete ? (
-          <button onClick={() => setConfirmDelete(true)} className="px-4 py-2 bg-white border border-alert/30 text-alert rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
-            Supprimer mon compte
-          </button>
-        ) : (
-          <div className="flex items-center gap-3">
-            <p className="text-sm text-alert font-medium">Confirmer la suppression ?</p>
-            <button onClick={handleDelete} className="px-4 py-2 bg-alert text-white rounded-xl text-sm font-medium hover:opacity-80 transition-opacity">
-              Oui, supprimer
-            </button>
-            <button onClick={() => setConfirmDelete(false)} className="px-4 py-2 bg-white border border-border text-muted rounded-xl text-sm hover:bg-slate-50 transition-colors">
-              Annuler
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
@@ -150,7 +117,7 @@ function AdminSection() {
   const [confirmPwd, setConfirmPwd] = useState("")
   const [error, setError] = useState("")
 
-  function loadUsers() { setUsers(getAllUsers()) }
+  async function loadUsers() { setUsers(await fetchAllUsers()) }
   useEffect(() => { loadUsers() }, [])
 
   function openNew() {
@@ -169,7 +136,7 @@ function AdminSection() {
     setSlideOpen(true)
   }
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setError("")
     if (!editingUser) {
@@ -177,30 +144,30 @@ function AdminSection() {
       if (!form.password) { setError("Mot de passe requis."); return }
       if (form.password !== confirmPwd) { setError("Les mots de passe ne correspondent pas."); return }
       if (form.password.length < 6) { setError("Minimum 6 caractères."); return }
-      const res = register({ ...form })
+      const res = await adminCreateUser({ ...form })
       if (!res.ok) { setError(res.error ?? "Erreur."); return }
     } else {
       // Modifier
-      const update: Parameters<typeof updateUser>[1] = {
-        prenom: form.prenom, nom: form.nom, email: form.email, role: form.role
+      const update: Parameters<typeof adminUpdateUser>[1] = {
+        prenom: form.prenom, nom: form.nom, email: form.email, role: form.role,
       }
       if (form.password) {
         if (form.password !== confirmPwd) { setError("Les mots de passe ne correspondent pas."); return }
         if (form.password.length < 6) { setError("Minimum 6 caractères."); return }
         update.password = form.password
       }
-      const res = updateUser(editingUser.id, update)
+      const res = await adminUpdateUser(editingUser.id, update)
       if (!res.ok) { setError(res.error ?? "Erreur."); return }
     }
-    loadUsers()
+    await loadUsers()
     setSlideOpen(false)
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!editingUser) return
-    const res = deleteUser(editingUser.id)
+    const res = await adminDeleteUser(editingUser.id)
     if (!res.ok) { setError(res.error ?? "Erreur."); return }
-    loadUsers()
+    await loadUsers()
     setSlideOpen(false)
   }
 
@@ -289,8 +256,7 @@ function AdminSection() {
 // Page principale
 // ──────────────────────────────────────────────
 export default function ComptePage() {
-  const { user, refresh, logout } = useAuth()
-  const router = useRouter()
+  const { user, refresh } = useAuth()
 
   if (!user) return null
 
@@ -302,13 +268,9 @@ export default function ComptePage() {
       </header>
 
       <div className="space-y-10">
-        <ProfilSection
-          user={user}
-          onUpdated={refresh}
-          onDeleted={logout}
-        />
+        <ProfilSection user={user} onUpdated={refresh} />
 
-        {user.role === "admin" && (
+        {(user.role === "admin" || user.role === "super_admin") && (
           <section>
             <div className="flex items-center gap-2 mb-5">
               <ShieldCheck size={18} className="text-red-600" />

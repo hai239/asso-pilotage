@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation"
 import SlideOver, { Field, Input, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 import JournalSuivi from "@/components/JournalSuivi"
 import AdresseAutocomplete from "@/components/AdresseAutocomplete"
-import { ChevronRight, Pencil, Plus, MapPin, Upload, RotateCcw } from "lucide-react"
+import DateInput from "@/components/DateInput"
+import { ChevronRight, Pencil, Plus, Upload, RotateCcw } from "lucide-react"
 import {
   fetchFamilles, fetchMembres, updateFamille, addMembre, deleteMembre, uploadFichier,
   type FamilleSheet, type MembreSheet
@@ -171,6 +172,22 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
 
   const quartier = String(famille.Quartier_QVP ?? "").trim()
 
+  // Dérivé des membres (pas d'appel API supplémentaire)
+  const contactPrincipal = membres.find(m => String(m.Contact_Principal ?? "").toLowerCase() === "oui") ?? null
+  const nbAdultes = membres.filter(m => m.Role === "Adulte").length
+  const nbEnfants = membres.filter(m => m.Role === "Enfant").length
+  const composition = [
+    nbAdultes ? `${nbAdultes} adulte${nbAdultes > 1 ? "s" : ""}` : "",
+    nbEnfants ? `${nbEnfants} enfant${nbEnfants > 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" · ")
+
+  const champsFamille: { label: string; value: string }[] = [
+    { label: "Adresse", value: String(famille.Adresse_Complete || famille.Adresse || "") },
+    { label: "Quartier QVP", value: quartier || "Hors QVP" },
+    { label: "Composition", value: composition },
+    { label: "Nombre de membres", value: String(membres.length) },
+  ].filter(c => c.value !== "")
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
 
@@ -197,27 +214,26 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
 
       {/* Infos famille */}
       <div className="bg-surface border border-border rounded-xl p-5 mb-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          {(famille.Adresse_Complete || famille.Adresse) && (
-            <div className="flex items-start gap-2">
-              <MapPin size={15} className="text-muted mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs text-muted mb-0.5">Adresse</p>
-                <p className="font-medium">{famille.Adresse_Complete || famille.Adresse}</p>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+          {champsFamille.map(c => (
+            <div key={c.label}>
+              <p className="text-xs text-muted mb-0.5">{c.label}</p>
+              <p className="text-sm font-medium text-foreground">{c.value}</p>
             </div>
-          )}
-          <div>
-            <p className="text-xs text-muted mb-1">Quartier QVP</p>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${quartier ? "bg-familles-light text-familles-dark" : "bg-slate-100 text-slate-500"}`}>
-              {quartier || "—"}
-            </span>
-          </div>
-          <div>
-            <p className="text-xs text-muted mb-1">Membres</p>
-            <p className="font-medium">{membres.length}</p>
-          </div>
+          ))}
         </div>
+
+        {contactPrincipal && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <p className="text-xs text-muted mb-0.5">Contact principal</p>
+            <Link
+              href={`/familles/${id}/membre/${contactPrincipal.ID_Membre}`}
+              className="text-sm font-medium text-familles-dark hover:underline"
+            >
+              {contactPrincipal.Prenom} {contactPrincipal.Nom}
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Section Membres */}
@@ -335,6 +351,9 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
           <Field label="Langue maternelle">
             <Input value={String(membreForm.Langue_Maternelle ?? "")} onChange={e => setMembreForm(f => ({ ...f, Langue_Maternelle: e.target.value }))} />
           </Field>
+          <Field label="Date de naissance">
+            <DateInput value={membreForm.Date_Naissance} onChange={v => setMembreForm(f => ({ ...f, Date_Naissance: v }))} />
+          </Field>
           <Field label="Niveau">
             <Select value={String(membreForm.Niveau ?? "")} onChange={e => setMembreForm(f => ({ ...f, Niveau: e.target.value }))}>
               <option value="">— Choisir —</option>
@@ -352,6 +371,9 @@ export default function FicheFamillePage({ params }: { params: Promise<{ id: str
               <option value="SUSPENDU">SUSPENDU</option>
               <option value="ARRÊTÉ">ARRÊTÉ</option>
             </Select>
+          </Field>
+          <Field label="Date d'inscription">
+            <DateInput value={membreForm.Date_Inscription} onChange={v => setMembreForm(f => ({ ...f, Date_Inscription: v }))} />
           </Field>
           <Field label="Bulletin d'inscription (PDF)">
             <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-surface text-sm text-muted cursor-pointer hover:border-familles transition-colors w-fit">

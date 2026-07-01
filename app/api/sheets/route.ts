@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
   sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, nextId, fmtDate, parseDateFr, ensureColumn,
@@ -19,6 +20,7 @@ function err(message: string, status = 400) {
 // ── GET ───────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  if (!(await getServerUser())) return err("Non authentifié.", 401)
   const { searchParams } = new URL(request.url)
   const action = searchParams.get("action") ?? "ping"
   const sheets = getSheetsClient()
@@ -53,6 +55,7 @@ export async function GET(request: NextRequest) {
 // ── POST ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  if (!(await getServerUser())) return err("Non authentifié.", 401)
   const body = await request.json()
   const { action } = body
   const sheets = getSheetsClient()
@@ -343,7 +346,7 @@ async function addMembre(sheets: Sheets, data: Record<string, unknown>) {
     "Commentaire": data.Notes ?? "",
   })
 
-  if (data.Niveau || data.Statut_Inscription) {
+  if (data.Niveau || data.Statut_Inscription || data.Date_Inscription) {
     const inscId = await nextId(sheets, "INSCRIPTION")
     await appendRow(sheets, "INSCRIPTION", {
       "ID": inscId,
@@ -353,7 +356,9 @@ async function addMembre(sheets: Sheets, data: Record<string, unknown>) {
       "Statut": data.Statut_Inscription ?? "",
       "Niveau / Classe": data.Niveau ?? "",
       "Orientation": data.Source_Orientation ?? "",
-      "Date d'inscription": new Date().toISOString().split("T")[0],
+      "Date d'inscription": data.Date_Inscription
+        ? parseDateFr(String(data.Date_Inscription))
+        : new Date().toISOString().split("T")[0],
     })
   }
 
@@ -383,13 +388,15 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
     data.Statut_Inscription !== undefined ||
     data.Niveau !== undefined ||
     data.Type_Apprenant !== undefined ||
-    data.Source_Orientation !== undefined
+    data.Source_Orientation !== undefined ||
+    data.Date_Inscription !== undefined
   ) {
     const imap: Record<string, unknown> = {}
     if (data.Statut_Inscription !== undefined) imap["Statut"] = data.Statut_Inscription
     if (data.Niveau !== undefined)             imap["Niveau / Classe"] = data.Niveau
     if (data.Type_Apprenant !== undefined)     imap["Type apprenant"] = data.Type_Apprenant
     if (data.Source_Orientation !== undefined) imap["Orientation"] = data.Source_Orientation
+    if (data.Date_Inscription !== undefined)   imap["Date d'inscription"] = parseDateFr(String(data.Date_Inscription))
 
     const inscriptions = await sheetToObjects(sheets, "INSCRIPTION")
     const persoInsc = inscriptions.filter((i) => String(i["Personne ID"]) === String(idMembre))
@@ -406,7 +413,9 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
         "Niveau / Classe": data.Niveau ?? "",
         "Type apprenant": data.Type_Apprenant ?? "",
         "Orientation": data.Source_Orientation ?? "",
-        "Date d'inscription": new Date().toISOString().split("T")[0],
+        "Date d'inscription": data.Date_Inscription
+          ? parseDateFr(String(data.Date_Inscription))
+          : new Date().toISOString().split("T")[0],
       })
     }
   }
@@ -596,6 +605,7 @@ function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unkn
     Niveau: d ? d["Niveau / Classe"] : "",
     Type_Apprenant: d ? d["Type apprenant"] : "",
     Source_Orientation: d ? d["Orientation"] : "",
+    Date_Inscription: d ? fmtDate(d["Date d'inscription"] as string) : "",
     Nb_Enfants: "",
     Notes: p["Commentaire"] ?? "",
   }
