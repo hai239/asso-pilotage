@@ -1,13 +1,14 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Heart, LogOut, UserCircle,
-  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, Map,
+  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, GraduationCap,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
-import { ROLE_LABELS } from "@/lib/auth"
+import { moduleForPath } from "@/lib/modules"
 
 // ──────────────────────────────────────────────
 // Tableau de bord "lanceur" : une carte par module (icône + libellé).
@@ -29,11 +30,10 @@ const modules: ModuleCard[] = [
   { href: "/emargement",    label: "Émargement",    sub: "Présences par séance",           icon: ClipboardCheck, accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
   { href: "/finances",      label: "Finances",      sub: "Financements, inscriptions",     icon: Euro,           accent: "bg-finances-light",     iconClass: "text-finances-dark" },
   { href: "/ateliers",      label: "Ateliers",      sub: "Planning, groupes",              icon: BookOpen,       accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
+  { href: "/positionnement", label: "Positionnement", sub: "Génération de tests",          icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/communication", label: "Communication", sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light", iconClass: "text-communication-dark" },
-  { href: "/membres",       label: "Membres",       sub: "Annuaire équipe",                icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
-  { href: "/roadmap",       label: "Roadmap",       sub: "Impact / facilité",              icon: Map,            accent: "bg-slate-100",          iconClass: "text-slate-700" },
+  { href: "/membres",       label: "Équipe",        sub: "Annuaire de l'équipe",           icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
   { href: "/compte",        label: "Mon compte",    sub: "Profil, comptes",                icon: UserCircle,     accent: "bg-slate-100",          iconClass: "text-slate-700" },
-  { href: "/docs",          label: "Documentation", sub: "Guides, ADR",                    icon: BookOpen,       accent: "bg-slate-100",          iconClass: "text-slate-700", superAdminOnly: true },
 ]
 
 function todayFr() {
@@ -51,16 +51,21 @@ export default function DashboardPage() {
 
   if (!user) return null
 
-  const cards = modules.filter((m) => !m.superAdminOnly || user.role === "super_admin")
+  // N'affiche que les cartes autorisées : Mon compte toujours, l'Équipe si
+  // administratrice, les modules selon les permissions de la personne.
+  const cards = modules.filter((m) => {
+    if (m.href === "/compte") return true
+    if (m.href === "/membres") return user.isAdmin === true
+    const key = moduleForPath(m.href)
+    return key ? (user.modules ?? []).includes(key) : true
+  })
 
   return (
     <div className="p-6 sm:p-10 max-w-5xl mx-auto">
       {/* En-tête : identité + déconnexion (repris de la sidebar, absente ici) */}
       <header className="flex flex-wrap items-center justify-between gap-4 mb-10">
         <div className="flex items-center gap-3">
-          <span className="bg-brand text-white rounded-xl p-2.5 shrink-0">
-            <Heart size={20} />
-          </span>
+          <Image src="/logo-area.png" alt="" width={40} height={40} className="rounded-xl shrink-0" />
           <div>
             <p className="text-sm text-muted capitalize">{todayFr()}</p>
             <h1 className="text-2xl font-bold text-foreground">Bonjour {user.prenom}</h1>
@@ -77,7 +82,7 @@ export default function DashboardPage() {
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-medium text-foreground truncate">{user.prenom} {user.nom}</span>
-              <span className="block text-[11px] text-muted truncate">{ROLE_LABELS[user.role]}</span>
+              <span className="block text-[11px] text-muted truncate">{user.isAdmin ? "Administratrice" : "Membre de l'équipe"}</span>
             </span>
           </Link>
           <button

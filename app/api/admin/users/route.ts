@@ -13,15 +13,15 @@ import type { AuthUser, Role } from "@/lib/auth"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-// Garde : renvoie le client admin si l'appelant est admin, sinon une erreur.
+// Garde : renvoie le client admin si l'appelant est administratrice, sinon une erreur.
 async function requireAdmin() {
   const caller = await getServerUser()
   if (!caller) {
     return { error: NextResponse.json({ error: "Non authentifié." }, { status: 401 }) }
   }
   const admin = createAdminClient()
-  const { data: prof } = await admin.from("profiles").select("role").eq("id", caller.id).single()
-  if (!prof || (prof.role !== "admin" && prof.role !== "super_admin")) {
+  const { data: prof } = await admin.from("profiles").select("is_admin").eq("id", caller.id).single()
+  if (!prof || prof.is_admin !== true) {
     return { error: NextResponse.json({ error: "Accès refusé." }, { status: 403 }) }
   }
   return { admin }
@@ -33,12 +33,18 @@ export async function GET() {
   if ("error" in guard) return guard.error
   const { data, error } = await guard.admin
     .from("profiles")
-    .select("id, email, nom, prenom, role, created_at")
+    .select("id, email, nom, prenom, role, created_at, telephone, statut, date_inscription, notes, is_admin, modules")
     .order("created_at", { ascending: true })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const users: AuthUser[] = (data ?? []).map((p) => ({
     id: p.id, email: p.email ?? "", nom: p.nom ?? "", prenom: p.prenom ?? "",
     role: p.role as Role, createdAt: p.created_at ?? "",
+    telephone: p.telephone ?? "",
+    statut: (p.statut ?? "en attente") as AuthUser["statut"],
+    dateInscription: p.date_inscription ?? "",
+    notes: p.notes ?? "",
+    isAdmin: p.is_admin === true,
+    modules: (p.modules ?? []) as AuthUser["modules"],
   }))
   return NextResponse.json(users)
 }
@@ -47,18 +53,32 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const guard = await requireAdmin()
   if ("error" in guard) return guard.error
-  const { email, password, nom, prenom, role } = await request.json()
+  const { email, password, nom, prenom, telephone, statut, dateInscription, notes, isAdmin, modules } = await request.json()
   if (!email || !password) {
     return NextResponse.json({ error: "Email et mot de passe requis." }, { status: 400 })
   }
-  // Le trigger public.handle_new_user crée le profil depuis les user_metadata.
-  const { error } = await guard.admin.auth.admin.createUser({
+  // Le trigger public.handle_new_user crée le profil de base depuis les
+  // user_metadata (role → défaut 'coordinatrice').
+  const { data: created, error } = await guard.admin.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
-    user_metadata: { nom: nom ?? "", prenom: prenom ?? "", role: role ?? "benevole" },
+    user_metadata: {
+      nom: nom ?? "", prenom: prenom ?? "",
+      telephone: telephone ?? "", statut: statut ?? "en attente",
+      date_inscription: dateInscription ?? "", notes: notes ?? "",
+    },
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // Permissions (is_admin + modules) : renseignées explicitement après création.
+  if (created?.user?.id) {
+    const { error: pErr } = await guard.admin
+      .from("profiles")
+      .update({ is_admin: isAdmin === true, modules: Array.isArray(modules) ? modules : [] })
+      .eq("id", created.user.id)
+    if (pErr) return NextResponse.json({ error: pErr.message }, { status: 400 })
+  }
   return NextResponse.json({ ok: true })
 }
 
@@ -66,15 +86,20 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const guard = await requireAdmin()
   if ("error" in guard) return guard.error
-  const { id, prenom, nom, email, role, password } = await request.json()
+  const { id, prenom, nom, email, password, telephone, statut, dateInscription, notes, isAdmin, modules } = await request.json()
   if (!id) return NextResponse.json({ error: "id requis." }, { status: 400 })
 
-  // 1) Table profiles (rôle + état civil)
+  // 1) Table profiles (état civil + annuaire + permissions)
   const profilePatch: Record<string, unknown> = {}
   if (prenom !== undefined) profilePatch.prenom = prenom
   if (nom !== undefined) profilePatch.nom = nom
   if (email !== undefined) profilePatch.email = email
-  if (role !== undefined) profilePatch.role = role
+  if (telephone !== undefined) profilePatch.telephone = telephone
+  if (statut !== undefined) profilePatch.statut = statut
+  if (dateInscription !== undefined) profilePatch.date_inscription = dateInscription
+  if (notes !== undefined) profilePatch.notes = notes
+  if (isAdmin !== undefined) profilePatch.is_admin = isAdmin === true
+  if (modules !== undefined) profilePatch.modules = Array.isArray(modules) ? modules : []
   if (Object.keys(profilePatch).length > 0) {
     const { error } = await guard.admin.from("profiles").update(profilePatch).eq("id", id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })

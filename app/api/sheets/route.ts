@@ -43,6 +43,8 @@ export async function GET(request: NextRequest) {
         return ok(await getEvenements(sheets, searchParams.get("categorie") ?? undefined))
       case "getAssiduite":
         return ok(await getAssiduite(sheets, searchParams.get("idEvenement") ?? undefined, searchParams.get("idPersonne") ?? undefined))
+      case "getPositionnements":
+        return ok(await getPositionnements(sheets))
       case "getAteliers":
         return ok(await getAteliers(sheets, searchParams.get("audience") ?? undefined))
       case "getIntervenants":
@@ -76,6 +78,7 @@ export async function POST(request: NextRequest) {
       case "addPaiement":     return ok(await addPaiement(sheets, body.data))
       case "updatePaiement":  return ok(await updatePaiement(sheets, body.idPaiement, body.data))
       case "deletePaiement":  return ok(await deletePaiement(sheets, body.idPaiement))
+      case "addInscription":    return ok(await addInscription(sheets, String(body.idMembre), body.data as Record<string, unknown>))
       case "updateInscription": return ok(await updateInscription(sheets, body.idInscription, body.data))
       case "addEvenement":    return ok(await addEvenement(sheets, body.data))
       case "updateEvenement": return ok(await updateEvenement(sheets, body.idEvenement, body.data))
@@ -179,6 +182,30 @@ async function deleteDocument(sheets: Sheets, idDoc: string) {
   }
   const supprime = await deleteRowById(sheets, "DOCUMENTS JOINTS", String(idDoc))
   return supprime ? { ok: true } : { error: "Document introuvable" }
+}
+
+// ── POSITIONNEMENT ────────────────────────────────────────
+
+async function getPositionnements(sheets: Sheets) {
+  try {
+    const rows = await sheetToObjects(sheets, "POSITIONNEMENT")
+    const result: Record<string, Record<string, unknown>> = {}
+    for (const row of rows) {
+      const niveau = String(row["Niveau"] ?? "")
+      const catId = String(row["Categorie_ID"] ?? "")
+      if (!niveau || !catId) continue
+      if (!result[niveau]) result[niveau] = {}
+      result[niveau][catId] = {
+        contenu: row["Contenu"] ?? "",
+        transcription: row["Transcription"] ?? "",
+        audio: row["Audio_URL"] ?? "",
+        image: row["Image_URL"] ?? "",
+      }
+    }
+    return result
+  } catch {
+    return {}
+  }
 }
 
 // ── LECTURE ───────────────────────────────────────────────
@@ -483,6 +510,7 @@ async function addMembre(sheets: Sheets, data: Record<string, unknown>) {
     "Langue maternelle": data.Langue_Maternelle ?? "",
     "Droit a l'image": data.Droit_Image ?? "",
     "Charte d'engagement": data.Charte ?? "",
+    "Beneficiaire": data.Beneficiaire ?? "",
     "Commentaire": data.Notes ?? "",
   })
 
@@ -499,6 +527,7 @@ async function addMembre(sheets: Sheets, data: Record<string, unknown>) {
       "Date d'inscription": data.Date_Inscription
         ? parseDateFr(String(data.Date_Inscription))
         : new Date().toISOString().split("T")[0],
+      "Montant d'inscription": 30,
     })
   }
 
@@ -519,6 +548,7 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
   if (data.Langue_Maternelle !== undefined) pmap["Langue maternelle"] = data.Langue_Maternelle
   if (data.Droit_Image !== undefined)      pmap["Droit a l'image"] = data.Droit_Image
   if (data.Charte !== undefined)           pmap["Charte d'engagement"] = data.Charte
+  if (data.Beneficiaire !== undefined)     pmap["Beneficiaire"] = data.Beneficiaire
   if (data.Notes !== undefined)            pmap["Commentaire"] = data.Notes
 
   const updated = await updateRowById(sheets, "PERSONNE", idMembre, pmap)
@@ -611,6 +641,26 @@ async function deletePaiement(sheets: Sheets, idPaiement: string) {
 
 // ── ÉCRITURE INSCRIPTION ──────────────────────────────────
 
+async function addInscription(sheets: Sheets, idMembre: string, data: Record<string, unknown>) {
+  const inscId = await nextId(sheets, "INSCRIPTION")
+  await appendRow(sheets, "INSCRIPTION", {
+    "ID": inscId,
+    "Personne ID": idMembre,
+    "Annee scolaire": data.Annee_Scolaire ?? "",
+    "Type apprenant": data.Type_Apprenant ?? "",
+    "Statut": "EN COURS",
+    "Niveau / Classe": data.Niveau ?? "",
+    "Disponibilite": data.Disponibilite ?? "",
+    "Orientation": data.Orientation ?? "",
+    "Beneficiaire": data.Beneficiaire ?? "",
+    "Date d'inscription": new Date().toISOString().split("T")[0],
+    "Montant adhesion": data.Montant_Adhesion ?? "",
+    "Montant d'inscription": data.Montant_Inscription ?? 30,
+    "Remarques": data.Remarques ?? "",
+  })
+  return { ok: true, ID_Inscription: String(inscId) }
+}
+
 async function updateInscription(sheets: Sheets, idInscription: string, data: Record<string, unknown>) {
   const map: Record<string, unknown> = {}
   if (data.Montant_Du !== undefined) {
@@ -618,8 +668,17 @@ async function updateInscription(sheets: Sheets, idInscription: string, data: Re
     map["Montant du"] = data.Montant_Du
   }
   if (data.Montant_Adhesion !== undefined) map["Montant adhesion"] = data.Montant_Adhesion
+  if (data.Montant_Inscription !== undefined) {
+    await ensureColumn(sheets, "INSCRIPTION", "Montant d'inscription")
+    map["Montant d'inscription"] = data.Montant_Inscription
+  }
+  if (data.Annee_Scolaire !== undefined)   map["Annee scolaire"] = data.Annee_Scolaire
+  if (data.Type_Apprenant !== undefined)   map["Type apprenant"] = data.Type_Apprenant
   if (data.Statut !== undefined)           map["Statut"] = data.Statut
   if (data.Niveau !== undefined)           map["Niveau / Classe"] = data.Niveau
+  if (data.Disponibilite !== undefined)    map["Disponibilite"] = data.Disponibilite
+  if (data.Orientation !== undefined)      map["Orientation"] = data.Orientation
+  if (data.Remarques !== undefined)        map["Remarques"] = data.Remarques
   const ok = await updateRowById(sheets, "INSCRIPTION", idInscription, map)
   return ok ? { ok: true } : { error: "Inscription introuvable" }
 }
@@ -838,6 +897,7 @@ function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unkn
     WhatsApp: "",
     Droit_Image: p["Droit a l'image"],
     Charte: p["Charte d'engagement"],
+    Beneficiaire: p["Beneficiaire"],
     Statut_Inscription: d ? d["Statut"] : "",
     Niveau: d ? d["Niveau / Classe"] : "",
     Type_Apprenant: d ? d["Type apprenant"] : "",
@@ -859,8 +919,8 @@ function mapInscription(i: Record<string, unknown>) {
     Disponibilite: i["Disponibilite"],
     Orientation: i["Orientation"],
     Date_Inscription: fmtDate(i["Date d'inscription"] as string),
-    Beneficiaire: i["Beneficiaire"],
     Montant_Adhesion: i["Montant adhesion"],
+    Montant_Inscription: i["Montant d'inscription"] !== undefined && i["Montant d'inscription"] !== "" ? i["Montant d'inscription"] : "",
     Montant_Du: i["Montant du"] !== undefined && i["Montant du"] !== "" ? i["Montant du"] : "",
     Remarques: i["Remarques"],
   }

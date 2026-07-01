@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback, use } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import SlideOver, { Field, Input, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
+import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
 import JournalSuivi from "@/components/JournalSuivi"
 import DateInput from "@/components/DateInput"
 import { ChevronRight, Plus, Pencil, Upload, FileText, ExternalLink, X } from "lucide-react"
 import {
   fetchFamilles, fetchMembre, updateMembre, deleteMembre, fetchPaiements,
-  addPaiement, updatePaiement, deletePaiement, updateInscription, uploadFichier,
+  addPaiement, updatePaiement, deletePaiement, addInscription, updateInscription, uploadFichier,
   fetchDocuments, deleteDocument,
   type FamilleSheet, type MembreSheet, type PaiementSheet, type InscriptionSheet, type DocumentJoint
 } from "@/lib/sheets-api"
@@ -58,11 +58,13 @@ const TYPES_DOCUMENT = [
 ]
 
 const niveauStyle: Record<string, string> = {
-  "Alpha":  "bg-slate-100 text-slate-600",
-  "A1-":    "bg-absences-light text-absences-dark",
-  "A1+":    "bg-absences-light text-absences-dark",
-  "A2-":    "bg-ateliers-light text-ateliers-dark",
-  "A2+/B1": "bg-finances-light text-finances-dark",
+  "CM1":          "bg-ateliers-light text-ateliers-dark",
+  "CE2":          "bg-ateliers-light text-ateliers-dark",
+  "6eme":         "bg-familles-light text-familles-dark",
+  "5eme":         "bg-familles-light text-familles-dark",
+  "4eme":         "bg-familles-light text-familles-dark",
+  "2nde":         "bg-finances-light text-finances-dark",
+  "Terminale CAP":"bg-finances-light text-finances-dark",
 }
 
 const statutStyle: Record<string, string> = {
@@ -70,6 +72,42 @@ const statutStyle: Record<string, string> = {
   "SUSPENDU": "bg-ateliers-light text-ateliers-dark",
   "ARRÊTÉ":   "bg-absences-light text-absences-dark",
   "ARRETE":   "bg-absences-light text-absences-dark",
+  "TERMINÉ":  "bg-slate-100 text-slate-600",
+  "TERMINE":  "bg-slate-100 text-slate-600",
+}
+
+const NIVEAUX = ["CM1", "CE2", "6eme", "5eme", "4eme", "2nde", "Terminale CAP"]
+const TYPES_APPRENANT = ["FLE", "Soutien scolaire"]
+
+/** Option supplémentaire si la valeur du Sheet ne figure pas dans la liste prédéfinie */
+function ExtraOption({ value, list }: { value: string; list: string[] }) {
+  if (!value || list.includes(value)) return null
+  return <option value={value}>{value}</option>
+}
+
+function getCurrentAnneeScolaire(): string {
+  const now = new Date()
+  const baseYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
+  const y1 = String(baseYear % 100).padStart(2, "0")
+  const y2 = String((baseYear + 1) % 100).padStart(2, "0")
+  return `${y1}-${y2}`
+}
+
+function getAnneeScolaireOptions(): string[] {
+  const now = new Date()
+  const baseYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
+  return [-1, 0, 1].map(offset => {
+    const y1 = String((baseYear + offset) % 100).padStart(2, "0")
+    const y2 = String((baseYear + offset + 1) % 100).padStart(2, "0")
+    return `${y1}-${y2}`
+  })
+}
+
+function parseAnneeScolaireEnd(annee: string): Date | null {
+  const match = String(annee).match(/^(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const endYear = 2000 + parseInt(match[2])
+  return new Date(endYear, 7, 31) // 31 août de l'année de fin
 }
 
 function InfoRow({ label, value }: { label: string; value?: string | number | null }) {
@@ -97,8 +135,18 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
   const [payOpen, setPayOpen]   = useState(false)
   const [payEditing, setPayEditing] = useState(false)
   const [payForm, setPayForm]   = useState<Partial<PaiementSheet>>({})
-  const [editAttenduId, setEditAttenduId] = useState<string | null>(null)
-  const [attenduDraft, setAttenduDraft] = useState("")
+  const [inscOpen, setInscOpen] = useState(false)
+  const [inscEditing, setInscEditing] = useState<InscriptionSheet | null>(null)
+  const [inscForm, setInscForm] = useState({
+    Annee_Scolaire: "", Type_Apprenant: "", Niveau: "",
+    Disponibilite: "", Orientation: "",
+    Montant_Adhesion: "", Montant_Inscription: "",
+  })
+  const [reinscOpen, setReinscOpen] = useState(false)
+  const [reinscForm, setReinscForm] = useState<Partial<InscriptionSheet>>({})
+  const [finOpen, setFinOpen] = useState(false)
+  const [finInsc, setFinInsc] = useState<InscriptionSheet | null>(null)
+  const [finForm, setFinForm] = useState({ Statut: "", Remarques: "" })
   const [docOpen, setDocOpen]   = useState(false)
   const [docType, setDocType]   = useState("")
   const [docFile, setDocFile]   = useState<File | null>(null)
@@ -116,8 +164,23 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
       setMembre(m)
       setForm(m)
       setPaiements(p)
-      setInscriptions(m.inscriptions ?? [])
       setDocuments(docs)
+
+      // Mise à jour automatique : inscriptions EN COURS dont l'année est échue → Terminé
+      const fetchedInscriptions = m.inscriptions ?? []
+      const today = new Date()
+      const toTerminer = fetchedInscriptions.filter(insc => {
+        if (!insc.Statut?.toUpperCase().includes("COURS")) return false
+        const end = parseAnneeScolaireEnd(String(insc.Annee_Scolaire))
+        return end !== null && today > end
+      })
+      if (toTerminer.length > 0) {
+        await Promise.all(toTerminer.map(insc => updateInscription(insc.ID_Inscription, { Statut: "Terminé" })))
+        const m2 = await fetchMembre(membreId)
+        setInscriptions(m2.inscriptions ?? [])
+      } else {
+        setInscriptions(fetchedInscriptions)
+      }
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }, [id, membreId])
@@ -149,8 +212,17 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
   }
 
   function openNewPaiement() {
+    const inscAvecReste = inscriptions
+      .map(insc => {
+        const paye = paiements.filter(p => p.ID_Inscription === insc.ID_Inscription)
+          .reduce((s, p) => s + (Number(p.Montant) || 0), 0)
+        const attendu = (Number(insc.Montant_Adhesion) || 0) + (Number(insc.Montant_Inscription) || 0)
+        return { insc, reste: attendu - paye }
+      })
+      .sort((a, b) => b.reste - a.reste)
+    const defaultInscId = inscAvecReste[0]?.insc.ID_Inscription ?? inscriptions[0]?.ID_Inscription ?? ""
     setPayEditing(false)
-    setPayForm({ ID_Inscription: inscriptions[0]?.ID_Inscription ?? "", Date_Paiement: "", Montant: "", Mode_Paiement: "" })
+    setPayForm({ ID_Inscription: defaultInscId, Date_Paiement: "", Montant: "", Mode_Paiement: "" })
     setPayOpen(true)
   }
 
@@ -176,10 +248,51 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
     setPayOpen(false)
   }
 
-  async function handleSaveAttendu(idInscription: string) {
-    await updateInscription(idInscription, { Montant_Du: attenduDraft })
+  async function handleSaveInscription() {
+    if (!inscEditing) return
+    await updateInscription(inscEditing.ID_Inscription, {
+      Annee_Scolaire:    inscForm.Annee_Scolaire,
+      Type_Apprenant:    inscForm.Type_Apprenant,
+      Niveau:            inscForm.Niveau,
+      Disponibilite:     inscForm.Disponibilite,
+      Orientation:       inscForm.Orientation,
+      Montant_Adhesion:  inscForm.Montant_Adhesion,
+      Montant_Inscription: inscForm.Montant_Inscription,
+    })
     await loadData()
-    setEditAttenduId(null)
+    setInscOpen(false)
+  }
+
+  function openReinscription() {
+    const derniere = [...inscriptions].sort((a, b) =>
+      String(b.Annee_Scolaire).localeCompare(String(a.Annee_Scolaire))
+    )[0]
+    setReinscForm({
+      Annee_Scolaire:      getCurrentAnneeScolaire(),
+      Type_Apprenant:      derniere?.Type_Apprenant ?? "",
+      Niveau:              derniere?.Niveau ?? "",
+      Disponibilite:       derniere?.Disponibilite ?? "",
+      Orientation:         derniere?.Orientation ?? "",
+      Montant_Adhesion:    derniere?.Montant_Adhesion ?? "",
+      Montant_Inscription: derniere?.Montant_Inscription ?? "30",
+    })
+    setReinscOpen(true)
+  }
+
+  async function handleSaveReinscription() {
+    await addInscription(membreId, reinscForm)
+    await loadData()
+    setReinscOpen(false)
+  }
+
+  async function handleSaveFin() {
+    if (!finInsc) return
+    await updateInscription(finInsc.ID_Inscription, {
+      Statut: finForm.Statut,
+      Remarques: finForm.Remarques,
+    })
+    await loadData()
+    setFinOpen(false)
   }
 
   function openDocument() {
@@ -348,9 +461,95 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
       {/* Journal : commentaires + appels + emails */}
       <JournalSuivi notes={membre.Notes} onSave={handleSaveNotes} />
 
+      {/* Inscriptions */}
+      <div className="bg-surface border border-border rounded-xl p-5 mb-6">
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h2 className="text-sm font-semibold text-foreground">
+            Inscriptions
+            {inscriptions.length > 0 && <span className="ml-2 text-xs font-normal text-muted">({inscriptions.length})</span>}
+          </h2>
+          <button onClick={openReinscription}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-familles text-white text-xs font-medium hover:bg-familles-dark transition-colors">
+            <Plus size={13} /> Réinscription
+          </button>
+        </div>
+        {inscriptions.length === 0 ? (
+          <p className="text-sm text-muted italic">Aucune inscription enregistrée.</p>
+        ) : (
+          <ul className="space-y-2">
+            {inscriptions.map(insc => {
+              const montantDu = (Number(insc.Montant_Adhesion) || 0) + (Number(insc.Montant_Inscription) || 0)
+              return (
+                <li key={insc.ID_Inscription} className="rounded-lg border border-border px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-sm font-semibold text-foreground">{insc.Annee_Scolaire || "—"}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {insc.Date_Inscription && (
+                        <span className="text-xs text-muted">{insc.Date_Inscription}</span>
+                      )}
+                      {insc.Statut && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          insc.Statut.toUpperCase().includes("COURS")   ? "bg-finances-light text-finances-dark"  :
+                          insc.Statut.toUpperCase().includes("SUSPEN")  ? "bg-ateliers-light text-ateliers-dark"  :
+                          insc.Statut.toUpperCase().includes("ARRET")   ? "bg-absences-light text-absences-dark"  :
+                          "bg-slate-100 text-slate-600"
+                        }`}>
+                          {insc.Statut}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 mt-2 flex-wrap">
+                    <p className="text-xs text-muted">
+                      Montant dû : <span className="font-semibold text-foreground">{montantDu} €</span>
+                      <span className="ml-2 text-slate-400">
+                        (adhésion {Number(insc.Montant_Adhesion) || 0} € + inscription {Number(insc.Montant_Inscription) || 0} €)
+                      </span>
+                    </p>
+                    <div className="flex flex-col items-end gap-1">
+                    <button
+                      onClick={() => {
+                        setInscEditing(insc)
+                        setInscForm({
+                          Annee_Scolaire:    String(insc.Annee_Scolaire ?? ""),
+                          Type_Apprenant:    String(insc.Type_Apprenant ?? ""),
+                          Niveau:            String(insc.Niveau ?? ""),
+                          Disponibilite:     String(insc.Disponibilite ?? ""),
+                          Orientation:       String(insc.Orientation ?? ""),
+                          Montant_Adhesion:  String(insc.Montant_Adhesion ?? ""),
+                          Montant_Inscription: String(insc.Montant_Inscription ?? "30"),
+                        })
+                        setInscOpen(true)
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-familles-dark hover:underline"
+                    >
+                      <Pencil size={12} /> Modifier
+                    </button>
+                    <button
+                      onClick={() => {
+                        setFinInsc(insc)
+                        setFinForm({ Statut: insc.Statut ?? "", Remarques: String(insc.Remarques ?? "") })
+                        setFinOpen(true)
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-absences-dark hover:underline"
+                    >
+                      <X size={12} /> Mettre fin à l'inscription
+                    </button>
+                    </div>
+                  </div>
+                  {insc.Remarques && (
+                    <p className="text-xs text-muted mt-1.5">{insc.Remarques}</p>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+
       {/* Paiements */}
       <div className="bg-surface border border-border rounded-xl p-5 mb-6">
-        <div className="flex items-center justify-between mb-4 gap-2">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <h2 className="text-sm font-semibold text-foreground">
             Paiements
             {paiements.length > 0 && <span className="ml-2 text-xs font-normal text-muted">({paiements.length})</span>}
@@ -363,91 +562,70 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
           )}
         </div>
 
-        {/* Récap par inscription : attendu / payé / reste à payer */}
-        {inscriptions.length > 0 && (
-          <div className="mb-4 space-y-2">
-            {inscriptions.map(insc => {
-              const paye = paiements
-                .filter(p => p.ID_Inscription === insc.ID_Inscription)
-                .reduce((s, p) => s + (Number(p.Montant) || 0), 0)
-              const attenduDefini = insc.Montant_Du !== undefined && insc.Montant_Du !== "" && insc.Montant_Du !== null
-              const attendu = Number(insc.Montant_Du) || 0
-              const reste = attendu - paye
-              const enEdition = editAttenduId === insc.ID_Inscription
-              return (
-                <div key={insc.ID_Inscription} className="rounded-lg border border-border px-4 py-3">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <p className="text-sm font-semibold text-foreground">{insc.Annee_Scolaire || "Inscription"}</p>
-                    {attenduDefini && (
-                      reste > 0
-                        ? <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-absences-light text-absences-dark">Reste à payer {reste} €</span>
-                        : <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-finances-light text-finances-dark">Soldé</span>
+        {/* Bandeau total */}
+        {(() => {
+          const totalAttendu = inscriptions.reduce((s, insc) =>
+            s + (Number(insc.Montant_Adhesion) || 0) + (Number(insc.Montant_Inscription) || 0), 0)
+          const totalPaye = paiements.reduce((s, p) => s + (Number(p.Montant) || 0), 0)
+          const totalReste = totalAttendu - totalPaye
+          if (totalAttendu === 0) return null
+          return (
+            <div className="mb-4">
+              {totalReste > 0
+                ? <span className="text-xs px-3 py-1.5 rounded-full font-medium bg-absences-light text-absences-dark">Reste à régler : {totalReste} €</span>
+                : <span className="text-xs px-3 py-1.5 rounded-full font-medium bg-finances-light text-finances-dark">Tout est soldé ✓</span>
+              }
+            </div>
+          )
+        })()}
+
+        {/* Liste des paiements */}
+        {paiements.length === 0 ? (
+          <p className="text-sm text-muted italic">
+            {inscriptions.length === 0 ? "Aucune inscription : impossible d'ajouter un paiement." : "Aucun paiement enregistré."}
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {[...paiements]
+              .sort((a, b) => (b.Date_Paiement ?? "").localeCompare(a.Date_Paiement ?? ""))
+              .map(p => (
+                <li key={p.ID_Paiement} className="flex items-center justify-between gap-3 py-3 flex-wrap">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-sm font-bold text-familles-dark shrink-0">{p.Montant} €</span>
+                    {p.Mode_Paiement && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-familles-light text-familles-dark">{p.Mode_Paiement}</span>
+                    )}
+                    {p.Date_Paiement && (
+                      <span className="text-xs text-muted">{p.Date_Paiement}</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 mt-1.5 text-xs text-muted flex-wrap">
-                    {enEdition ? (
-                      <span className="flex items-center gap-1.5">
-                        Attendu
-                        <input type="number" autoFocus value={attenduDraft}
-                          onChange={e => setAttenduDraft(e.target.value)}
-                          className="w-20 px-2 py-1 rounded-lg border border-border text-sm" />
-                        <button onClick={() => handleSaveAttendu(insc.ID_Inscription)} className="text-familles-dark font-medium hover:underline">OK</button>
-                        <button onClick={() => setEditAttenduId(null)} className="text-muted hover:underline">Annuler</button>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5">
-                        Attendu <span className="font-medium text-foreground">{attenduDefini ? `${attendu} €` : "non défini"}</span>
-                        <button
-                          onClick={() => { setEditAttenduId(insc.ID_Inscription); setAttenduDraft(attenduDefini ? String(attendu) : "") }}
-                          className="text-familles-dark hover:text-familles-dark" aria-label="Modifier le montant attendu" title="Modifier le montant attendu">
-                          <Pencil size={12} />
-                        </button>
-                      </span>
-                    )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => openEditPaiement(p)} aria-label="Modifier" title="Modifier"
+                      className="p-1.5 rounded text-muted hover:text-familles-dark hover:bg-familles-light transition-colors">
+                      <Pencil size={13} />
+                    </button>
+                    <button onClick={async () => {
+                        if (!confirm("Supprimer ce paiement ?")) return
+                        await deletePaiement(p.ID_Paiement)
+                        await loadData()
+                      }}
+                      aria-label="Supprimer" title="Supprimer"
+                      className="p-1.5 rounded text-muted hover:text-absences-dark hover:bg-absences-light transition-colors">
+                      <X size={13} />
+                    </button>
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Liste des paiements (modifiable) */}
-        {paiements.length > 0 && (
-          <div className="space-y-2">
-            {paiements.map(p => (
-              <div key={p.ID_Paiement} className="flex items-center justify-between gap-3 bg-slate-50 rounded-lg px-4 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-sm font-bold text-familles-dark shrink-0">
-                    {p.Montant ? `${p.Montant} €` : "—"}
-                  </span>
-                  {p.Mode_Paiement && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-familles-light text-familles-dark">
-                      {p.Mode_Paiement}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <p className="text-sm font-medium text-foreground">{p.Date_Paiement || "—"}</p>
-                  <button onClick={() => openEditPaiement(p)} aria-label="Modifier ce paiement" title="Modifier"
-                    className="p-1.5 rounded-lg text-muted hover:text-familles-dark hover:bg-familles-light transition-colors">
-                    <Pencil size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {inscriptions.length === 0 && (
-          <p className="text-sm text-muted italic">Aucune inscription : impossible d'ajouter un paiement.</p>
+                </li>
+              ))
+            }
+          </ul>
         )}
       </div>
 
       {/* SlideOver paiement */}
       <SlideOver open={payOpen} onClose={() => setPayOpen(false)} title={payEditing ? "Modifier le paiement" : "Ajouter un paiement"} width="md">
         <form onSubmit={e => { e.preventDefault(); handleSavePaiement() }} className="flex flex-col gap-4">
-          {!payEditing && inscriptions.length > 1 && (
-            <Field label="Année scolaire (inscription)" required>
+          {!payEditing && inscriptions.length > 0 && (
+            <Field label="Année scolaire" required>
               <Select value={String(payForm.ID_Inscription ?? "")} onChange={e => setPayForm(f => ({ ...f, ID_Inscription: e.target.value }))}>
                 {inscriptions.map(i => (
                   <option key={i.ID_Inscription} value={i.ID_Inscription}>{i.Annee_Scolaire || `Inscription ${i.ID_Inscription}`}</option>
@@ -474,6 +652,165 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
           </Field>
           <SaveButton />
           {payEditing && <DeleteButton onClick={handleDeletePaiement} />}
+        </form>
+      </SlideOver>
+
+      {/* SlideOver réinscription */}
+      <SlideOver open={reinscOpen} onClose={() => setReinscOpen(false)} title="Réinscription" width="md">
+        <form onSubmit={e => { e.preventDefault(); handleSaveReinscription() }} className="flex flex-col gap-4">
+          <FormRow>
+            <Field label="Année scolaire" required>
+              <Select value={String(reinscForm.Annee_Scolaire ?? "")} onChange={e => setReinscForm(f => ({ ...f, Annee_Scolaire: e.target.value }))}>
+                {getAnneeScolaireOptions().map(y => <option key={y} value={y}>{y}</option>)}
+              </Select>
+            </Field>
+            <Field label="Type d'apprenant">
+              <Select value={String(reinscForm.Type_Apprenant ?? "")} onChange={e => setReinscForm(f => ({ ...f, Type_Apprenant: e.target.value }))}>
+                <option value="">—</option>
+                <ExtraOption value={String(reinscForm.Type_Apprenant ?? "")} list={TYPES_APPRENANT} />
+                <option value="FLE">FLE</option>
+                <option value="Soutien scolaire">Soutien scolaire</option>
+              </Select>
+            </Field>
+          </FormRow>
+          <Field label="Niveau scolaire">
+            <Select value={String(reinscForm.Niveau ?? "")} onChange={e => setReinscForm(f => ({ ...f, Niveau: e.target.value }))}>
+              <option value="">—</option>
+              <ExtraOption value={String(reinscForm.Niveau ?? "")} list={NIVEAUX} />
+              <option value="CM1">CM1</option>
+              <option value="CE2">CE2</option>
+              <option value="6eme">6ème</option>
+              <option value="5eme">5ème</option>
+              <option value="4eme">4ème</option>
+              <option value="2nde">2nde</option>
+              <option value="Terminale CAP">Terminale CAP</option>
+            </Select>
+          </Field>
+          <Field label="Disponibilités">
+            <Input value={String(reinscForm.Disponibilite ?? "")} onChange={e => setReinscForm(f => ({ ...f, Disponibilite: e.target.value }))} placeholder="ex. Lundi matin, Mercredi" />
+          </Field>
+          <Field label="Orientation">
+            <Input value={String(reinscForm.Orientation ?? "")} onChange={e => setReinscForm(f => ({ ...f, Orientation: e.target.value }))} placeholder="ex. CAF, CPAM…" />
+          </Field>
+          <FormRow>
+            <Field label="Montant d'adhésion (€)">
+              <Input type="number" value={String(reinscForm.Montant_Adhesion ?? "")} onChange={e => setReinscForm(f => ({ ...f, Montant_Adhesion: e.target.value }))} placeholder="0" />
+            </Field>
+            <Field label="Montant d'inscription (€)">
+              <Input type="number" value={String(reinscForm.Montant_Inscription ?? "30")} onChange={e => setReinscForm(f => ({ ...f, Montant_Inscription: e.target.value }))} placeholder="30" />
+            </Field>
+          </FormRow>
+          <div className="px-3 py-2.5 rounded-xl bg-slate-50 border border-border text-sm text-muted">
+            Total dû :{" "}
+            <span className="font-semibold text-foreground">
+              {(Number(reinscForm.Montant_Adhesion) || 0) + (Number(reinscForm.Montant_Inscription) || 0)} €
+            </span>
+          </div>
+          <SaveButton />
+        </form>
+      </SlideOver>
+
+      {/* SlideOver mettre fin à l'inscription */}
+      <SlideOver open={finOpen} onClose={() => setFinOpen(false)} title="Mettre fin à l'inscription" width="md">
+        <form onSubmit={e => { e.preventDefault(); handleSaveFin() }} className="flex flex-col gap-4">
+          {finInsc && (
+            <div className="px-3 py-2 rounded-xl bg-slate-50 border border-border text-xs text-muted">
+              Inscription {finInsc.Annee_Scolaire || "—"}
+            </div>
+          )}
+          <Field label="Nouveau statut" required>
+            <Select value={finForm.Statut} onChange={e => setFinForm(f => ({ ...f, Statut: e.target.value }))}>
+              <option value="">— Choisir —</option>
+              <option value="Arrêté">Arrêté</option>
+              <option value="Suspendu">Suspendu</option>
+              <option value="Terminé">Terminé</option>
+            </Select>
+          </Field>
+          <Field label="Remarque">
+            <Textarea
+              value={finForm.Remarques}
+              onChange={e => setFinForm(f => ({ ...f, Remarques: e.target.value }))}
+              placeholder="Motif, observations…"
+            />
+          </Field>
+          <SaveButton />
+        </form>
+      </SlideOver>
+
+      {/* SlideOver inscription */}
+      <SlideOver open={inscOpen} onClose={() => setInscOpen(false)} title="Modifier l'inscription" width="md">
+        <form onSubmit={e => { e.preventDefault(); handleSaveInscription() }} className="flex flex-col gap-4">
+          {/* Champs en lecture seule */}
+          {inscEditing && (
+            <div className="rounded-xl bg-slate-50 border border-border px-4 py-3 flex flex-col gap-2">
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Informations non modifiables</p>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted">Statut</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  inscEditing.Statut?.toUpperCase().includes("COURS")  ? "bg-finances-light text-finances-dark"  :
+                  inscEditing.Statut?.toUpperCase().includes("SUSPEN") ? "bg-ateliers-light text-ateliers-dark"  :
+                  inscEditing.Statut?.toUpperCase().includes("ARRET")  ? "bg-absences-light text-absences-dark"  :
+                  "bg-slate-100 text-slate-600"
+                }`}>{inscEditing.Statut || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted">Date d'inscription</span>
+                <span className="text-xs font-medium text-foreground">{inscEditing.Date_Inscription || "—"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted">Bénéficiaire</span>
+                <span className="text-xs font-medium text-foreground">{membre.Beneficiaire || "—"}</span>
+              </div>
+            </div>
+          )}
+          {/* Champs modifiables */}
+          <FormRow>
+            <Field label="Année scolaire">
+              <Input value={inscForm.Annee_Scolaire} onChange={e => setInscForm(f => ({ ...f, Annee_Scolaire: e.target.value }))} placeholder="2024-2025" />
+            </Field>
+            <Field label="Type d'apprenant">
+              <Select value={inscForm.Type_Apprenant} onChange={e => setInscForm(f => ({ ...f, Type_Apprenant: e.target.value }))}>
+                <option value="">—</option>
+                <ExtraOption value={inscForm.Type_Apprenant} list={TYPES_APPRENANT} />
+                <option value="FLE">FLE</option>
+                <option value="Soutien scolaire">Soutien scolaire</option>
+              </Select>
+            </Field>
+          </FormRow>
+          <Field label="Niveau scolaire">
+            <Select value={inscForm.Niveau} onChange={e => setInscForm(f => ({ ...f, Niveau: e.target.value }))}>
+              <option value="">—</option>
+              <ExtraOption value={inscForm.Niveau} list={NIVEAUX} />
+              <option value="CM1">CM1</option>
+              <option value="CE2">CE2</option>
+              <option value="6eme">6ème</option>
+              <option value="5eme">5ème</option>
+              <option value="4eme">4ème</option>
+              <option value="2nde">2nde</option>
+              <option value="Terminale CAP">Terminale CAP</option>
+            </Select>
+          </Field>
+          <Field label="Disponibilités">
+            <Input value={inscForm.Disponibilite} onChange={e => setInscForm(f => ({ ...f, Disponibilite: e.target.value }))} placeholder="ex. Lundi matin, Mercredi" />
+          </Field>
+          <Field label="Orientation">
+            <Input value={inscForm.Orientation} onChange={e => setInscForm(f => ({ ...f, Orientation: e.target.value }))} placeholder="ex. CAF, CPAM…" />
+          </Field>
+          <FormRow>
+            <Field label="Montant d'adhésion (€)">
+              <Input type="number" value={inscForm.Montant_Adhesion} onChange={e => setInscForm(f => ({ ...f, Montant_Adhesion: e.target.value }))} placeholder="0" />
+            </Field>
+            <Field label="Montant d'inscription (€)">
+              <Input type="number" value={inscForm.Montant_Inscription} onChange={e => setInscForm(f => ({ ...f, Montant_Inscription: e.target.value }))} placeholder="30" />
+            </Field>
+          </FormRow>
+          <div className="px-3 py-2.5 rounded-xl bg-slate-50 border border-border text-sm text-muted">
+            Total dû :{" "}
+            <span className="font-semibold text-foreground">
+              {(Number(inscForm.Montant_Adhesion) || 0) + (Number(inscForm.Montant_Inscription) || 0)} €
+            </span>
+          </div>
+          <SaveButton />
         </form>
       </SlideOver>
 
@@ -520,14 +857,17 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             <DateInput value={form.Date_Naissance != null ? String(form.Date_Naissance) : ""} onChange={v => setForm(f => ({ ...f, Date_Naissance: v }))} />
           </Field>
           <FormRow>
-            <Field label="Niveau">
+            <Field label="Niveau / Classe">
               <Select value={String(form.Niveau ?? "")} onChange={e => setForm(f => ({ ...f, Niveau: e.target.value }))}>
                 <option value="">—</option>
-                <option value="Alpha">Alpha</option>
-                <option value="A1-">A1-</option>
-                <option value="A1+">A1+</option>
-                <option value="A2-">A2-</option>
-                <option value="A2+/B1">A2+/B1</option>
+                <ExtraOption value={String(form.Niveau ?? "")} list={NIVEAUX} />
+                <option value="CM1">CM1</option>
+                <option value="CE2">CE2</option>
+                <option value="6eme">6ème</option>
+                <option value="5eme">5ème</option>
+                <option value="4eme">4ème</option>
+                <option value="2nde">2nde</option>
+                <option value="Terminale CAP">Terminale CAP</option>
               </Select>
             </Field>
             <Field label="Statut">

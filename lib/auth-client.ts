@@ -8,7 +8,8 @@
 //   (qui seule détient la clé service_role).
 // ──────────────────────────────────────────────────────────────
 import { createClient } from "@/lib/supabase/client"
-import type { AuthUser, Role } from "./auth"
+import type { AuthUser, StatutMembre } from "./auth"
+import type { ModuleKey } from "./modules"
 
 type Result = { ok: boolean; error?: string }
 
@@ -52,7 +53,9 @@ export async function fetchAllUsers(): Promise<AuthUser[]> {
 }
 
 export async function adminCreateUser(data: {
-  email: string; password: string; nom: string; prenom: string; role: Role
+  email: string; password: string; nom: string; prenom: string
+  telephone?: string; statut?: StatutMembre; dateInscription?: string; notes?: string
+  isAdmin?: boolean; modules?: ModuleKey[]
 }): Promise<Result> {
   const res = await fetch("/api/admin/users", {
     method: "POST",
@@ -64,7 +67,9 @@ export async function adminCreateUser(data: {
 }
 
 export async function adminUpdateUser(id: string, data: {
-  prenom?: string; nom?: string; email?: string; role?: Role; password?: string
+  prenom?: string; nom?: string; email?: string; password?: string
+  telephone?: string; statut?: StatutMembre; dateInscription?: string; notes?: string
+  isAdmin?: boolean; modules?: ModuleKey[]
 }): Promise<Result> {
   const res = await fetch("/api/admin/users", {
     method: "PATCH",

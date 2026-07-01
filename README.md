@@ -73,7 +73,6 @@ Pour comprendre pourquoi les choses sont faites ainsi.
 | Ateliers | `/ateliers` | Planning, notes apprenantes, composition de groupes |
 | Communication | `/communication` | Calendrier éditorial + kanban (Brouillon → À valider → Validé → Publié) + génération IA (Claude) |
 | Membres | `/membres` | Annuaire équipe |
-| Roadmap | `/roadmap` | Matrice impact/facilité |
 | Mon compte | `/compte` | Profil + mot de passe (+ **gestion des comptes** pour les admins) |
 
 > **Auth & routes API** : toutes les routes `/api/*` (`sheets`, `assiduite`, `ocr`, `generate-post`, `admin/users`) sont protégées par la session Supabase (401 si non authentifié).

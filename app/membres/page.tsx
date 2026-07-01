@@ -1,31 +1,21 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
-import { Plus, Pencil, Search, UserCheck, UserX, Users } from "lucide-react"
-import { ROLE_LABELS, type Role } from "@/lib/auth"
-import { membres as membresMock } from "@/lib/mock-data"
+import { Plus, Pencil, UserCheck, UserX, Users, ShieldCheck } from "lucide-react"
+import { type StatutMembre, type AuthUser } from "@/lib/auth"
+import { MODULES, MODULE_PRESETS, ALL_MODULE_KEYS, type ModuleKey } from "@/lib/modules"
+import { fetchAllUsers, adminCreateUser, adminUpdateUser, adminDeleteUser } from "@/lib/auth-client"
 
 // ──────────────────────────────────────────────
-// Types
+// Source de vérité : Supabase (auth.users + profiles), via /api/admin/users.
+// Chaque membre = un compte de connexion + une liste d'accès (modules) + un
+// éventuel statut d'administratrice (gestion des comptes).
+//
+// Le module Ateliers lit la liste des membres depuis un MIROIR localStorage
+// (lecture seule, id numérique dérivé) — réécrit après chaque mutation.
 // ──────────────────────────────────────────────
-type StatutMembre = "active" | "inactive" | "en attente"
-
-interface Membre {
-  id: number
-  prenom: string
-  nom: string
-  email: string
-  telephone: string
-  role: Role
-  statut: StatutMembre
-  dateInscription: string
-  notes: string
-}
-
-const STORAGE_KEY = "asso-membres"
-
-const MEMBRES_INITIAUX: Membre[] = membresMock.liste as Membre[]
+const MIRROR_KEY = "asso-membres"
 
 const statutStyle: Record<StatutMembre, string> = {
   "active":     "bg-finances-light text-finances-dark",
@@ -33,76 +23,153 @@ const statutStyle: Record<StatutMembre, string> = {
   "en attente": "bg-absences-light text-absences-dark",
 }
 
-const roleStyle: Record<Role, string> = {
-  super_admin:   "bg-slate-900 text-white",
-  admin:         "bg-communication-light text-communication-dark",
-  coordinatrice: "bg-ateliers-light text-ateliers-dark",
-  formatrice:    "bg-benevoles-light text-benevoles-dark",
-  benevole:      "bg-slate-100 text-slate-600",
+// Hash déterministe uuid → entier (pour le miroir lu par Ateliers, typé number).
+function hashId(uuid: string): number {
+  let h = 0
+  for (let i = 0; i < uuid.length; i++) h = (Math.imul(31, h) + uuid.charCodeAt(i)) | 0
+  return Math.abs(h)
 }
 
-function load(fallback: Membre[]): Membre[] {
-  if (typeof window === "undefined") return fallback
-  try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : fallback } catch { return fallback }
+interface FormState {
+  prenom: string
+  nom: string
+  email: string
+  telephone: string
+  statut: StatutMembre
+  dateInscription: string
+  notes: string
+  password: string
+  isAdmin: boolean
+  modules: ModuleKey[]
 }
 
-const empty = (): Omit<Membre, "id"> => ({
+const emptyForm = (): FormState => ({
   prenom: "", nom: "", email: "", telephone: "",
-  role: "benevole", statut: "en attente",
+  statut: "en attente",
   dateInscription: new Date().toISOString().split("T")[0],
-  notes: "",
+  notes: "", password: "",
+  isAdmin: false, modules: [],
 })
 
 // ──────────────────────────────────────────────
 // Page
 // ──────────────────────────────────────────────
 export default function MembresPage() {
-  const [membres, setMembres] = useState<Membre[]>(MEMBRES_INITIAUX)
-  const [search, setSearch]   = useState("")
-  const [filterRole, setFilterRole] = useState<Role | "tous">("tous")
+  const [membres, setMembres] = useState<AuthUser[]>([])
+  const [loading, setLoading] = useState(true)
   const [slideOpen, setSlideOpen] = useState(false)
-  const [editing,   setEditing]   = useState<Membre | null>(null)
-  const [form,      setForm]      = useState<Omit<Membre, "id">>(empty())
+  const [editing,   setEditing]   = useState<AuthUser | null>(null)
+  const [form,      setForm]      = useState<FormState>(emptyForm())
+  const [confirmPwd, setConfirmPwd] = useState("")
+  const [error,     setError]     = useState("")
+  const [saving,    setSaving]    = useState(false)
 
-  useEffect(() => { setMembres(load(MEMBRES_INITIAUX)) }, [])
+  const load = useCallback(async () => {
+    setLoading(true)
+    const list = await fetchAllUsers()
+    setMembres(list)
+    // Miroir localStorage pour Ateliers (lecture seule).
+    try {
+      localStorage.setItem(MIRROR_KEY, JSON.stringify(list.map((u) => ({
+        id: hashId(u.id),
+        prenom: u.prenom, nom: u.nom, email: u.email,
+        telephone: u.telephone ?? "", role: u.role,
+        statut: u.statut ?? "en attente",
+        dateInscription: u.dateInscription ?? "", notes: u.notes ?? "",
+      }))))
+    } catch { /* miroir best-effort */ }
+    setLoading(false)
+  }, [])
 
-  function persist(data: Membre[]) { setMembres(data); localStorage.setItem(STORAGE_KEY, JSON.stringify(data)) }
+  useEffect(() => { load() }, [load])
 
-  function openNew()       { setEditing(null); setForm(empty()); setSlideOpen(true) }
-  function openEdit(m: Membre) { setEditing(m); setForm({ ...m }); setSlideOpen(true) }
-
-  function handleSave() {
-    const updated = editing
-      ? membres.map((x) => x.id === editing.id ? { ...form, id: editing.id } : x)
-      : [...membres, { ...form, id: Date.now() }]
-    persist(updated); setSlideOpen(false)
+  function openNew() {
+    setEditing(null); setForm(emptyForm()); setConfirmPwd(""); setError(""); setSlideOpen(true)
+  }
+  function openEdit(m: AuthUser) {
+    setEditing(m)
+    setForm({
+      prenom: m.prenom, nom: m.nom, email: m.email, telephone: m.telephone ?? "",
+      statut: m.statut ?? "en attente",
+      dateInscription: m.dateInscription || new Date().toISOString().split("T")[0],
+      notes: m.notes ?? "", password: "",
+      isAdmin: m.isAdmin === true, modules: m.modules ?? [],
+    })
+    setConfirmPwd(""); setError(""); setSlideOpen(true)
   }
 
-  function handleDelete() {
+  // ── Sélection des modules ──
+  function toggleModule(key: ModuleKey) {
+    setForm((f) => ({
+      ...f,
+      modules: f.modules.includes(key) ? f.modules.filter((k) => k !== key) : [...f.modules, key],
+    }))
+  }
+  function applyPreset(keys: ModuleKey[]) {
+    setForm((f) => ({ ...f, modules: [...keys] }))
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setError("")
+
+    if (!editing) {
+      // Création d'un compte Supabase (email + mot de passe)
+      if (!form.password) { setError("Mot de passe requis."); return }
+      if (form.password !== confirmPwd) { setError("Les mots de passe ne correspondent pas."); return }
+      if (form.password.length < 6) { setError("Minimum 6 caractères."); return }
+      setSaving(true)
+      const res = await adminCreateUser({
+        email: form.email, password: form.password, nom: form.nom, prenom: form.prenom,
+        telephone: form.telephone, statut: form.statut,
+        dateInscription: form.dateInscription, notes: form.notes,
+        isAdmin: form.isAdmin, modules: form.modules,
+      })
+      setSaving(false)
+      if (!res.ok) { setError(res.error ?? "Erreur."); return }
+    } else {
+      // Modification d'un compte existant
+      const update: Parameters<typeof adminUpdateUser>[1] = {
+        prenom: form.prenom, nom: form.nom, email: form.email,
+        telephone: form.telephone, statut: form.statut,
+        dateInscription: form.dateInscription, notes: form.notes,
+        isAdmin: form.isAdmin, modules: form.modules,
+      }
+      if (form.password) {
+        if (form.password !== confirmPwd) { setError("Les mots de passe ne correspondent pas."); return }
+        if (form.password.length < 6) { setError("Minimum 6 caractères."); return }
+        update.password = form.password
+      }
+      setSaving(true)
+      const res = await adminUpdateUser(editing.id, update)
+      setSaving(false)
+      if (!res.ok) { setError(res.error ?? "Erreur."); return }
+    }
+
+    await load()
+    setSlideOpen(false)
+  }
+
+  async function handleDelete() {
     if (!editing) return
-    persist(membres.filter((x) => x.id !== editing.id))
+    setError("")
+    const res = await adminDeleteUser(editing.id)
+    if (!res.ok) { setError(res.error ?? "Erreur."); return }
+    await load()
     setSlideOpen(false)
   }
 
   // Stats
   const actifs    = membres.filter((m) => m.statut === "active").length
-  const benevoles = membres.filter((m) => m.role === "benevole").length
+  const admins    = membres.filter((m) => m.isAdmin === true).length
   const enAttente = membres.filter((m) => m.statut === "en attente").length
-
-  // Filtres
-  const filtered = membres.filter((m) => {
-    const q = search.toLowerCase()
-    const matchSearch = !q || `${m.prenom} ${m.nom} ${m.email}`.toLowerCase().includes(q)
-    const matchRole = filterRole === "tous" || m.role === filterRole
-    return matchSearch && matchRole
-  })
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <header className="mb-8 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Membres</h1>
-          <p className="text-sm text-muted mt-1">Équipe, formatrices, bénévoles et coordinatrices</p>
+          <h1 className="text-2xl font-bold text-foreground">Équipe</h1>
+          <p className="text-sm text-muted mt-1">Comptes de l'équipe et accès aux modules</p>
         </div>
         <button onClick={openNew} className="flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors">
           <Plus size={14} /> Ajouter un membre
@@ -115,9 +182,9 @@ export default function MembresPage() {
           <p className="text-3xl font-bold text-finances-dark">{actifs}</p>
           <p className="text-sm text-finances-dark/70 mt-1">Membres actifs</p>
         </div>
-        <div className="bg-benevoles-light rounded-xl border border-benevoles/20 p-4">
-          <p className="text-3xl font-bold text-benevoles-dark">{benevoles}</p>
-          <p className="text-sm text-benevoles-dark/70 mt-1">Bénévoles</p>
+        <div className="bg-communication-light rounded-xl border border-communication/20 p-4">
+          <p className="text-3xl font-bold text-communication-dark">{admins}</p>
+          <p className="text-sm text-communication-dark/70 mt-1">Administratrices</p>
         </div>
         <div className={`rounded-xl border p-4 ${enAttente > 0 ? "bg-absences-light border-absences/20" : "bg-surface border-border"}`}>
           <p className={`text-3xl font-bold ${enAttente > 0 ? "text-absences-dark" : "text-foreground"}`}>{enAttente}</p>
@@ -125,64 +192,53 @@ export default function MembresPage() {
         </div>
       </div>
 
-      {/* Filtres */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher un membre…"
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30 focus:border-ateliers"
-          />
-        </div>
-        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-          {(["tous", "admin", "coordinatrice", "formatrice", "benevole"] as const).map((r) => (
-            <button
-              key={r}
-              onClick={() => setFilterRole(r)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${filterRole === r ? "bg-white text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
-            >
-              {r === "tous" ? "Tous" : ROLE_LABELS[r]}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Liste */}
       <section className="bg-surface rounded-xl border border-border overflow-hidden">
         <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="font-semibold text-foreground text-sm flex items-center gap-2"><Users size={14} /> {filtered.length} membre{filtered.length > 1 ? "s" : ""}</h2>
+          <h2 className="font-semibold text-foreground text-sm flex items-center gap-2"><Users size={14} /> {membres.length} membre{membres.length > 1 ? "s" : ""}</h2>
         </div>
 
-        {filtered.length === 0 ? (
+        {loading ? (
+          <p className="text-center text-sm text-muted py-8 italic">Chargement…</p>
+        ) : membres.length === 0 ? (
           <p className="text-center text-sm text-muted py-8 italic">Aucun membre trouvé</p>
         ) : (
           <ul className="divide-y divide-border">
-            {filtered.map((m) => (
-              <li key={m.id} className="px-5 py-4 flex items-center gap-4 hover:bg-slate-50 group">
-                {/* Avatar */}
-                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center shrink-0 text-xs font-bold text-slate-500">
-                  {m.prenom[0]}{m.nom[0]}
-                </div>
+            {membres.map((m) => {
+              const nbAcces = m.isAdmin ? ALL_MODULE_KEYS.length : (m.modules?.length ?? 0)
+              return (
+                <li key={m.id} className="px-5 py-4 flex items-center gap-4 hover:bg-slate-50 group">
+                  {/* Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center shrink-0 text-xs font-bold text-slate-500">
+                    {m.prenom[0]}{m.nom[0]}
+                  </div>
 
-                {/* Infos */}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground text-sm">{m.prenom} {m.nom}</p>
-                  <p className="text-xs text-muted mt-0.5 truncate">{m.email}{m.telephone ? ` · ${m.telephone}` : ""}</p>
-                  {m.notes && <p className="text-xs text-slate-400 italic mt-0.5 truncate">{m.notes}</p>}
-                </div>
+                  {/* Infos */}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground text-sm">{m.prenom} {m.nom}</p>
+                    <p className="text-xs text-muted mt-0.5 truncate">{m.email}{m.telephone ? ` · ${m.telephone}` : ""}</p>
+                    {m.notes && <p className="text-xs text-slate-400 italic mt-0.5 truncate">{m.notes}</p>}
+                  </div>
 
-                {/* Tags */}
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${roleStyle[m.role]}`}>{ROLE_LABELS[m.role]}</span>
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statutStyle[m.statut]}`}>{m.statut}</span>
-                  {m.statut === "active" ? <UserCheck size={13} className="text-finances-dark" /> : <UserX size={13} className="text-muted" />}
-                  <button onClick={() => openEdit(m)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Pencil size={13} />
-                  </button>
-                </div>
-              </li>
-            ))}
+                  {/* Tags */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {m.isAdmin && (
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-communication-light text-communication-dark flex items-center gap-1">
+                        <ShieldCheck size={12} /> Admin
+                      </span>
+                    )}
+                    <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                      {m.isAdmin ? "Tous les accès" : `${nbAcces} accès`}
+                    </span>
+                    {m.statut && <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statutStyle[m.statut]}`}>{m.statut}</span>}
+                    {m.statut === "active" ? <UserCheck size={13} className="text-finances-dark" /> : <UserX size={13} className="text-muted" />}
+                    <button onClick={() => openEdit(m)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
@@ -192,9 +248,10 @@ export default function MembresPage() {
         open={slideOpen}
         onClose={() => setSlideOpen(false)}
         title={editing ? `Modifier — ${editing.prenom} ${editing.nom}` : "Nouveau membre"}
-        subtitle="Informations & rôle"
+        subtitle="Compte, informations & accès"
       >
-        <form onSubmit={(e) => { e.preventDefault(); handleSave() }} className="flex flex-col gap-4">
+        <form onSubmit={handleSave} className="flex flex-col gap-4">
+          {error && <p className="text-sm text-alert bg-red-50 border border-alert/20 px-3 py-2 rounded-lg">{error}</p>}
           <FormRow>
             <Field label="Prénom" required>
               <Input placeholder="Nadjat" value={form.prenom} onChange={e => setForm(f => ({ ...f, prenom: e.target.value }))} />
@@ -210,29 +267,91 @@ export default function MembresPage() {
             <Input placeholder="06 12 34 56 78" value={form.telephone} onChange={e => setForm(f => ({ ...f, telephone: e.target.value }))} />
           </Field>
           <FormRow>
-            <Field label="Rôle">
-              <Select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
-                {(Object.entries(ROLE_LABELS) as [Role, string][]).map(([r, label]) => (
-                  <option key={r} value={r}>{label}</option>
-                ))}
-              </Select>
-            </Field>
             <Field label="Statut">
               <Select value={form.statut} onChange={e => setForm(f => ({ ...f, statut: e.target.value as StatutMembre }))}>
-                <option>active</option>
-                <option>inactive</option>
-                <option>en attente</option>
+                <option value="active">active</option>
+                <option value="inactive">inactive</option>
+                <option value="en attente">en attente</option>
               </Select>
             </Field>
+            <Field label="Date d'inscription">
+              <Input type="date" value={form.dateInscription} onChange={e => setForm(f => ({ ...f, dateInscription: e.target.value }))} />
+            </Field>
           </FormRow>
-          <Field label="Date d'inscription">
-            <Input type="date" value={form.dateInscription} onChange={e => setForm(f => ({ ...f, dateInscription: e.target.value }))} />
+
+          {/* Compte — mot de passe */}
+          <Field label={editing ? "Nouveau mot de passe (laisser vide pour ne pas changer)" : "Mot de passe"} required={!editing}>
+            <Input type="password" placeholder="6 caractères min." value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
           </Field>
+          {(form.password || !editing) && (
+            <Field label="Confirmer le mot de passe" required={!editing}>
+              <Input type="password" placeholder="Identique" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} />
+            </Field>
+          )}
+
+          {/* Accès aux modules */}
+          <div className="border border-border rounded-xl p-4 bg-surface">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-foreground">Accès aux modules</p>
+              <span className="text-xs text-muted">{form.isAdmin ? "Tous (admin)" : `${form.modules.length}/${ALL_MODULE_KEYS.length}`}</span>
+            </div>
+
+            {/* Modèles rapides */}
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {MODULE_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => applyPreset(p.keys)}
+                  className="text-xs px-2.5 py-1 rounded-full border border-border bg-slate-50 text-muted hover:border-slate-400 hover:text-foreground transition-colors"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Cases par module */}
+            <div className={`grid grid-cols-2 gap-1.5 ${form.isAdmin ? "opacity-50 pointer-events-none" : ""}`}>
+              {MODULES.map((mod) => {
+                const checked = form.isAdmin || form.modules.includes(mod.key)
+                return (
+                  <label key={mod.key} className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-border hover:bg-slate-50 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={form.isAdmin}
+                      onChange={() => toggleModule(mod.key)}
+                      className="w-4 h-4 rounded border-border accent-slate-900"
+                    />
+                    <span className="text-foreground">{mod.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+            {form.isAdmin && (
+              <p className="text-xs text-muted mt-2 italic">Une administratrice a accès à tous les modules.</p>
+            )}
+          </div>
+
+          {/* Administratrice */}
+          <label className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-surface cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.isAdmin}
+              onChange={e => setForm(f => ({ ...f, isAdmin: e.target.checked }))}
+              className="w-4 h-4 mt-0.5 rounded border-border accent-communication-dark"
+            />
+            <span>
+              <span className="text-sm font-medium text-foreground flex items-center gap-1.5"><ShieldCheck size={13} className="text-communication-dark" /> Administratrice</span>
+              <span className="block text-xs text-muted mt-0.5">Peut gérer les comptes de l'équipe et distribuer les accès. Accède à tous les modules.</span>
+            </span>
+          </label>
+
           <Field label="Notes">
             <Textarea placeholder="Compétences, disponibilités, commentaire…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </Field>
-          <SaveButton />
-          {editing && <DeleteButton onClick={handleDelete} />}
+          <SaveButton label={saving ? "Enregistrement…" : "Enregistrer"} />
+          {editing && <DeleteButton onClick={handleDelete} label="Supprimer ce compte" />}
         </form>
       </SlideOver>
     </div>

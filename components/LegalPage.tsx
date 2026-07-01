@@ -1,5 +1,6 @@
+import Image from "next/image"
 import Link from "next/link"
-import { Heart, ArrowLeft } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 
 // ──────────────────────────────────────────────
 // Gabarit commun aux pages légales publiques
@@ -26,9 +27,7 @@ export default function LegalPage({
       <header className="border-b border-border bg-surface">
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
-            <span className="bg-brand text-white rounded-lg p-1.5">
-              <Heart size={16} />
-            </span>
+            <Image src="/logo-area.png" alt="" width={28} height={28} className="rounded-lg" />
             <span className="font-semibold text-foreground text-sm">Asso — Pilotage</span>
           </div>
           <Link

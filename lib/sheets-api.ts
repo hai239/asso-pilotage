@@ -24,6 +24,7 @@ export interface MembreSheet {
   WhatsApp: string
   Droit_Image?: string
   Charte?: string
+  Beneficiaire?: string
   Statut_Inscription: string
   Niveau: string
   Type_Apprenant?: string
@@ -59,8 +60,8 @@ export interface InscriptionSheet {
   Disponibilite: string
   Orientation: string
   Date_Inscription: string
-  Beneficiaire: string
   Montant_Adhesion: string | number
+  Montant_Inscription?: string | number
   Montant_Du?: string | number
   Remarques: string
 }
@@ -183,6 +184,10 @@ export async function updatePaiement(idPaiement: string, data: Partial<PaiementS
 
 export async function deletePaiement(idPaiement: string): Promise<{ ok: boolean }> {
   return apiPost({ action: "deletePaiement", idPaiement }) as Promise<{ ok: boolean }>
+}
+
+export async function addInscription(idMembre: string, data: Partial<InscriptionSheet>): Promise<{ ok: boolean, ID_Inscription: string }> {
+  return apiPost({ action: "addInscription", idMembre, data }) as Promise<{ ok: boolean, ID_Inscription: string }>
 }
 
 export async function updateInscription(idInscription: string, data: Partial<InscriptionSheet>): Promise<{ ok: boolean }> {

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { signIn } from "@/lib/auth-client"
 import { useAuth } from "@/lib/auth-context"
@@ -38,9 +39,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo / nom */}
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-3">
-            <span className="text-white font-bold text-lg">A</span>
-          </div>
+          <Image src="/logo-area.png" alt="AREA Nantes" width={56} height={56} className="rounded-2xl mx-auto mb-3" />
           <h1 className="text-xl font-bold text-foreground">Asso — Pilotage</h1>
           <p className="text-sm text-muted mt-1">Espace de gestion de l'association</p>
         </div>

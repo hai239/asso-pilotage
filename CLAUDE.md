@@ -33,11 +33,10 @@ app/
 ├── communication/  Calendrier éditorial + kanban suivi posts + archive publiés
 ├── benevoles/      Disponibilités bénévoles + gestion événements
 ├── membres/        Annuaire membres (rôles, statuts, CRUD)
-├── familles/       Bénéficiaires — familles, parents, enfants ✅ NOUVEAU
-│   ├── page.tsx              Listing 3 onglets (Familles / Parents / Enfants)
-│   ├── [id]/page.tsx         Fiche famille + ajout membre
-│   └── [id]/membre/[membreId]/page.tsx  Fiche membre individuelle
-└── roadmap/        Matrice impact/facilité + suivi sous-actions
+└── familles/       Bénéficiaires — familles, parents, enfants ✅ NOUVEAU
+    ├── page.tsx              Listing 3 onglets (Familles / Parents / Enfants)
+    ├── [id]/page.tsx         Fiche famille + ajout membre
+    └── [id]/membre/[membreId]/page.tsx  Fiche membre individuelle
 
 components/
 ├── Sidebar.tsx     Navigation + chip utilisateur connecté
@@ -50,7 +49,6 @@ lib/
 ├── auth-context.tsx    Provider React + hook useAuth()
 ├── mock-data.ts        Données mockées (absences, finances, ateliers, com, bénévoles)
 ├── emargement-data.ts  Séances + présences initiales
-├── roadmap-data.ts     6 thèmes, 16 use cases, 43 sous-actions
 ├── sheets-api.ts       Couche client module Familles (fetch → /api/sheets)
 └── google-sheets-server.ts  Clients Sheets + Drive (compte de service, côté serveur)
 
@@ -109,8 +107,25 @@ import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteB
 import { useAuth } from "@/lib/auth-context"
 const { user, logout } = useAuth()
 // user : AuthUser | null  →  { id, email, nom, prenom, role, createdAt }
-// role : "admin" | "formatrice" | "coordinatrice" | "benevole"
+// role : "super_admin" | "admin" | "formatrice" | "coordinatrice" | "benevole"
 ```
+L'authentification passe par **Supabase** (voir `docs/explanation/adr/007-auth-supabase.md`).
+
+### ⚠️ Règle — TOUTES les URLs passent par l'authentification
+Toute route de l'application (l'espace « dashboard » et tous ses modules) **exige une
+session authentifiée**. Une URL n'est accessible sans connexion que si elle figure
+explicitement dans les **exceptions publiques** :
+- `/login`
+- les pages légales : `/mentions-legales`, `/confidentialite`, `/accessibilite`
+  (liste `LEGAL_PATHS` dans `components/AuthGate.tsx`)
+
+Concrètement :
+- **Pages** : `components/AuthGate.tsx` redirige tout·e visiteur·se non authentifié·e vers
+  `/login` (sauf exceptions ci-dessus). Toute nouvelle page fait donc partie du périmètre
+  protégé par défaut — ne l'ajoute JAMAIS à `LEGAL_PATHS`/exceptions sans décision explicite.
+- **Routes API** (`app/api/*`) : chaque handler doit commencer par la garde serveur
+  `if (!(await getServerUser())) return 401` (`lib/supabase/server.ts`). Toute nouvelle
+  route API exposant des données ou appelant un service tiers DOIT être gardée.
 
 ### "use client" — règle
 Toutes les pages sont `"use client"` (localStorage, état, hooks).
@@ -175,7 +190,7 @@ IDs réservés : 9001–9099. Supprimer ce fichier + le dossier `app/dev/` avant
 - ❌ Ne pas créer `tailwind.config.ts` — config dans `globals.css`
 - ❌ Ne pas importer `Linkedin`, `Instagram`, `Facebook`, `Kanban` de lucide-react (n'existent pas en v1.16.0)
 - ❌ Ne pas utiliser `bg-[var(--color-xxx)]` — utiliser `bg-xxx`
-- ❌ Ne pas créer de routes API (`app/api/`) sans décision d'équipe — exceptions validées : `app/api/generate-post/route.ts` (génération IA), `app/api/sheets/route.ts` (backend Google Sheets du module Familles), `app/api/ocr/route.ts` (OCR bulletins d'inscription via Gemini API)
+- ❌ Ne pas créer de routes API (`app/api/`) sans décision d'équipe — exceptions validées : `app/api/generate-post/route.ts` (génération IA), `app/api/sheets/route.ts` (backend Google Sheets du module Familles), `app/api/ocr/route.ts` (OCR bulletins d'inscription via Gemini API), `app/api/subventions-sheet/*` (backend Google Sheets de la Veille subventions : lecture CSV + écriture via Web App Apps Script — nécessite `SHEETS_WEBAPP_URL` + `SHEETS_WEBAPP_TOKEN`)
 - ❌ Ne pas mettre de données dans l'URL (PII)
 - ❌ Ne pas casser le pattern SlideOver existant (cohérence UX)
 

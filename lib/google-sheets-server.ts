@@ -27,6 +27,19 @@ function getDriveClient() {
   return google.drive({ version: "v3", auth })
 }
 
+export const POSITIONNEMENT_FOLDER_ID = "1VkfMr7hECZqKeSZhM7eIAbzCQ745yUUZ"
+
+/** Rend un fichier Drive accessible publiquement (lecture) et retourne son URL de téléchargement direct. */
+export async function makeFilePublic(fileId: string): Promise<string> {
+  const drive = getDriveClient()
+  await drive.permissions.create({
+    fileId,
+    requestBody: { role: "reader", type: "anyone" },
+    supportsAllDrives: true,
+  })
+  return `https://drive.google.com/uc?export=download&id=${fileId}`
+}
+
 /** Supprime un fichier Drive (best-effort : peut échouer si le compte de service n'en est pas propriétaire). */
 export async function deleteDriveFile(fileId: string): Promise<void> {
   const drive = getDriveClient()

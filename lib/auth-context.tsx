@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const { data: profile } = await supabase
       .from("profiles")
-      .select("email, nom, prenom, role, created_at")
+      .select("email, nom, prenom, role, created_at, is_admin, modules")
       .eq("id", sUser.id)
       .single()
 
@@ -44,6 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       prenom: profile?.prenom ?? "",
       role: (profile?.role ?? "coordinatrice") as Role,
       createdAt: profile?.created_at ?? sUser.created_at ?? "",
+      isAdmin: profile?.is_admin === true,
+      modules: (profile?.modules ?? []) as AuthUser["modules"],
     })
     setLoading(false)
   }, [supabase])
