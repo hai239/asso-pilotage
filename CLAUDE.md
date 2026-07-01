@@ -175,7 +175,7 @@ IDs réservés : 9001–9099. Supprimer ce fichier + le dossier `app/dev/` avant
 - ❌ Ne pas créer `tailwind.config.ts` — config dans `globals.css`
 - ❌ Ne pas importer `Linkedin`, `Instagram`, `Facebook`, `Kanban` de lucide-react (n'existent pas en v1.16.0)
 - ❌ Ne pas utiliser `bg-[var(--color-xxx)]` — utiliser `bg-xxx`
-- ❌ Ne pas créer de routes API (`app/api/`) sans décision d'équipe — exceptions validées : `app/api/generate-post/route.ts` (génération IA) et `app/api/sheets/route.ts` (backend Google Sheets du module Familles)
+- ❌ Ne pas créer de routes API (`app/api/`) sans décision d'équipe — exceptions validées : `app/api/generate-post/route.ts` (génération IA), `app/api/sheets/route.ts` (backend Google Sheets du module Familles), `app/api/ocr/route.ts` (OCR bulletins d'inscription via Gemini API)
 - ❌ Ne pas mettre de données dans l'URL (PII)
 - ❌ Ne pas casser le pattern SlideOver existant (cohérence UX)
 
@@ -526,6 +526,7 @@ ajoutée dans la table `DOCUMENTS JOINTS`.
 ```
 GOOGLE_CLIENT_EMAIL=...@....iam.gserviceaccount.com   # compte de service
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+GEMINI_API_KEY=...                                    # OCR bulletins d'inscription (Google AI Studio)
 ```
 - Scopes utilisés : `spreadsheets` + `drive`.
 - Le compte de service doit avoir **accès Éditeur** au Sheet `BDD_Asso_CRM` et aux 4 dossiers Drive.

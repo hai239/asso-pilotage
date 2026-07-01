@@ -76,6 +76,7 @@ asso/
 │   ├── membres/page.tsx
 │   ├── familles/…            ← module Familles (backend Google Sheets, pas localStorage)
 │   ├── api/sheets/route.ts   ← API REST Google Sheets v4 (module Familles)
+│   ├── api/ocr/route.ts      ← OCR PDF via Gemini API (bulletins d'inscription)
 │   └── roadmap/page.tsx
 ├── components/
 │   ├── AuthGate.tsx         ← protection routes + sidebar conditionnelle
@@ -129,6 +130,23 @@ Pages familles
 - Auth : **compte de service** (`GOOGLE_CLIENT_EMAIL` / `GOOGLE_PRIVATE_KEY`), scopes `spreadsheets` + `drive`.
 - Tables : FAMILLE / PERSONNE / INSCRIPTION / PAIEMENT / EVALUATION / DOCUMENTS JOINTS…
 - Aucune clé localStorage pour ce module.
+
+## OCR bulletins d'inscription (Gemini API)
+
+La route `app/api/ocr/route.ts` permet d'extraire les données d'un bulletin
+d'inscription PDF manuscrit via Gemini 2.5 Flash (sortie JSON structurée).
+
+```
+Formulaire ajout membre
+  → POST /api/ocr (PDF base64)
+      → Gemini 2.5 Flash (schéma structuré)
+      → { nom, prenom, date_naissance, telephones[] }
+  → Pré-remplissage du formulaire
+  → À l'enregistrement : uploadFichier() → Drive "Fiche d'inscription"
+```
+
+Variable d'environnement requise : `GEMINI_API_KEY` (Google AI Studio).
+Voir ADR 006 et `docs/how-to/ocr-bulletin-inscription.md`.
 
 ## Conventions de nommage
 
