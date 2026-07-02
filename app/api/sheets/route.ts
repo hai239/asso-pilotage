@@ -623,7 +623,6 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         Salle: a["Salle"] ?? "",
         Mode_Groupage: a["Mode groupage"] ?? "",
         Taille_Cible: a["Taille cible"] ?? "",
-        Ratio_Encadrement: a["Ratio encadrement"] ?? "",
         Competences_Ciblees: competences,
         Taches: a["Taches"] ?? "",
         Besoins: a["Besoins"] ?? "",
@@ -1217,7 +1216,6 @@ function atelierRow(data: Record<string, unknown>): Record<string, unknown> {
     "Salle": data.Salle ?? "",
     "Mode groupage": data.Mode_Groupage ?? "",
     "Taille cible": data.Taille_Cible ?? "",
-    "Ratio encadrement": data.Ratio_Encadrement ?? "",
     "Competences ciblees": joinList(data.Competences_Ciblees, ","),
     "Taches": joinList(data.Taches, "\n"),
     "Besoins": joinList(data.Besoins, "\n"),
@@ -1394,8 +1392,8 @@ interface RecapEleveRow {
   vacances: string
   combienDeGroupe: number
   combienDeSeances: number
-  dureeChaqueSeance: string
-  heuresParEleve: string
+  dureeChaqueSeance: number
+  heuresParEleve: number
   nElèves: number
   elementaire6e: number
   collegeLycee: number
@@ -1439,6 +1437,12 @@ function formatMinutes(mins: number): string {
   const h = Math.floor(rounded / 60)
   const m = rounded % 60
   return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
+}
+
+/** Durée en heures décimales (ex. 90 → 1.5) — format numérique pour
+ *  permettre les calculs côté Google Sheet, contrairement à formatMinutes(). */
+function minutesToHeures(mins: number): number {
+  return Math.round((mins / 60) * 100) / 100
 }
 
 async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
@@ -1582,8 +1586,8 @@ async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
       vacances: periode,
       combienDeGroupe: atelierIds.length,
       combienDeSeances: nbSeancesMoyen,
-      dureeChaqueSeance: formatMinutes(dureeMoyenneMin),
-      heuresParEleve: formatMinutes(average(heuresParEleveIndiv)),
+      dureeChaqueSeance: minutesToHeures(dureeMoyenneMin),
+      heuresParEleve: minutesToHeures(average(heuresParEleveIndiv)),
       nElèves: beneficiaireIds.size,
       elementaire6e,
       collegeLycee,

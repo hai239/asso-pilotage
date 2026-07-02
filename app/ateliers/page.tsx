@@ -14,7 +14,6 @@ import {
 import {
   emptyFiche,
   migrateFiche,
-  encadrantsRequis,
   niveauEcole,
   COULEURS_ATELIER,
   type FicheAtelier,
@@ -132,7 +131,6 @@ interface AtelierSheet {
   Salle: string
   Mode_Groupage: string
   Taille_Cible: string
-  Ratio_Encadrement: string
   Competences_Ciblees: string[]
   Taches: string
   Besoins: string
@@ -173,8 +171,6 @@ function atelierFromSheet(a: AtelierSheet): Session {
     ageMin: null,
     ageMax: null,
     tailleGroupeCible: a.Taille_Cible ? Number(a.Taille_Cible) : null,
-    ratioEncadrement: a.Ratio_Encadrement ? Number(a.Ratio_Encadrement) : null,
-    mixerNiveaux: false,
     modeGroupage: a.Mode_Groupage === "disponibilite" ? "disponibilite" : "notes",
     taches: toLines(a.Taches),
     besoins: toLines(a.Besoins),
@@ -923,8 +919,8 @@ interface RecapEleveRow {
   vacances: string
   combienDeGroupe: number
   combienDeSeances: number
-  dureeChaqueSeance: string
-  heuresParEleve: string
+  dureeChaqueSeance: number
+  heuresParEleve: number
   nElèves: number
   elementaire6e: number
   collegeLycee: number
@@ -993,7 +989,7 @@ function RecapEleveTab() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-sm text-muted">
-          Bilan quantitatif par type d'atelier et période — calculé en direct depuis le Sheet.
+          Bilan quantitatif par type d'atelier et période.
         </p>
         <button
           type="button"
@@ -1963,7 +1959,6 @@ export default function AteliersPage() {
         // Parents & ateliers "classiques" → par notes ; théâtre/marionnettes → par disponibilité.
         Mode_Groupage: f.audience !== "parents" && parDispo ? "disponibilite" : "notes",
         Taille_Cible: f.tailleGroupeCible ?? "",
-        Ratio_Encadrement: f.ratioEncadrement ?? "",
         Competences_Ciblees: f.competencesCiblees,
         Taches: f.taches,
         Besoins: f.besoins,
@@ -2699,10 +2694,6 @@ export default function AteliersPage() {
             <p className="text-xs font-semibold text-ateliers-dark uppercase tracking-wider mb-2">
               Compétences travaillées
             </p>
-            <p className="text-[11px] text-muted mb-3">
-              Cochez les thématiques du test de positionnement qui seront travaillées.
-              Elles servent à proposer une composition de groupes adaptée.
-            </p>
             <div className="grid grid-cols-2 gap-2">
               {THEMATIQUES.map(t => {
                 const checked = sessionForm.competencesCiblees.includes(t.key)
@@ -2734,8 +2725,7 @@ export default function AteliersPage() {
             )}
           </div>
 
-          {/* ── Paramètres de groupage ──
-              Pour les ateliers parents : ni notion d'âge, ni ratio d'encadrement. */}
+          {/* ── Paramètres de groupage ── */}
           <div className="rounded-xl border border-border bg-surface/50 p-3">
             <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">
               Paramètres de groupage
@@ -2744,57 +2734,15 @@ export default function AteliersPage() {
               Définissent comment l&apos;algorithme construira les groupes du brouillon.
               {sessionForm.audience !== "parents" && " L'âge des bénéficiaires est géré automatiquement par tranches (6-9, 10-13, 14-18 ans)."}
             </p>
-            {sessionForm.audience === "parents" ? (
-              <Field label="Taille de groupe cible">
-                <Input
-                  type="number" min={2} max={30} placeholder="10"
-                  value={sessionForm.tailleGroupeCible ?? ""}
-                  onChange={e => setSessionForm(f => ({
-                    ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
-                  }))}
-                />
-              </Field>
-            ) : (
-              <>
-                <FormRow>
-                  <Field label="Taille de groupe cible">
-                    <Input
-                      type="number" min={2} max={30} placeholder="10"
-                      value={sessionForm.tailleGroupeCible ?? ""}
-                      onChange={e => setSessionForm(f => ({
-                        ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
-                      }))}
-                    />
-                  </Field>
-                  <Field label="Ratio encadrement (1 pour N)">
-                    <Input
-                      type="number" min={1} max={20} placeholder="(optionnel)"
-                      value={sessionForm.ratioEncadrement ?? ""}
-                      onChange={e => setSessionForm(f => ({
-                        ...f, ratioEncadrement: e.target.value === "" ? null : Number(e.target.value),
-                      }))}
-                    />
-                  </Field>
-                </FormRow>
-                {sessionForm.ratioEncadrement !== null && sessionForm.tailleGroupeCible !== null && (
-                  <p className="text-[11px] text-muted mt-1">
-                    → {encadrantsRequis(sessionForm.ratioEncadrement, sessionForm.tailleGroupeCible)} encadrant·es
-                    requis par groupe de {sessionForm.tailleGroupeCible}.
-                  </p>
-                )}
-              </>
-            )}
-            <label className="flex items-center gap-2 mt-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={sessionForm.mixerNiveaux}
-                onChange={e => setSessionForm(f => ({ ...f, mixerNiveaux: e.target.checked }))}
-                className="rounded border-border"
+            <Field label="Taille de groupe cible (facultatif)">
+              <Input
+                type="number" min={2} max={30} placeholder="10"
+                value={sessionForm.tailleGroupeCible ?? ""}
+                onChange={e => setSessionForm(f => ({
+                  ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
+                }))}
               />
-              <span className="text-xs text-foreground">
-                Mélanger les niveaux <span className="text-muted">(par défaut : groupes homogènes)</span>
-              </span>
-            </label>
+            </Field>
           </div>
 
           {/* ── Organisation ── */}

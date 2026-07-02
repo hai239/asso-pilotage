@@ -118,14 +118,6 @@ export interface FicheAtelier {
   /** Nombre de bénéficiaires visé par groupe. null = pas de contrainte. */
   tailleGroupeCible: number | null
 
-  /** 1 encadrant pour N bénéficiaires. null = pas de ratio strict.
-   *  Ex : atelier exposé → 2 (1 bénévole pour 2 bénéficiaires). */
-  ratioEncadrement: number | null
-
-  /** Mode de groupage. False (défaut) = homogène (niveaux proches ensemble).
-   *  True = hétérogène (mélange volontaire des niveaux). */
-  mixerNiveaux: boolean
-
   /** Critère de composition des groupes :
    *  • "notes" (défaut) → par niveau (notes du positionnement) + cycle scolaire ;
    *  • "disponibilite" → par créneau de disponibilité, sans notes (théâtre/marionnettes). */
@@ -155,8 +147,6 @@ export function emptyFiche(): FicheAtelier {
     ageMin: null,
     ageMax: null,
     tailleGroupeCible: null,
-    ratioEncadrement: null,
-    mixerNiveaux: false,
     modeGroupage: "notes",
     taches: [],
     besoins: [],
@@ -191,8 +181,6 @@ export function migrateFiche<T extends FicheAtelierLegacy>(s: T): T & FicheAteli
     ageMin:                 s.ageMin                 ?? null,
     ageMax:                 s.ageMax                 ?? null,
     tailleGroupeCible:      s.tailleGroupeCible      ?? null,
-    ratioEncadrement:       s.ratioEncadrement       ?? null,
-    mixerNiveaux:           s.mixerNiveaux           ?? false,
     modeGroupage:           s.modeGroupage           ?? "notes",
     taches:                 s.taches                 ?? [],
     besoins:                s.besoins                ?? [],
@@ -200,16 +188,6 @@ export function migrateFiche<T extends FicheAtelierLegacy>(s: T): T & FicheAteli
     personnesImpliqueesIds: s.personnesImpliqueesIds ?? [],
     periode,
   }
-}
-
-/** Calcule le nombre d'encadrants requis pour un groupe donné.
- *  null si l'atelier n'impose pas de ratio. */
-export function encadrantsRequis(
-  ratio: number | null,
-  tailleGroupe: number,
-): number | null {
-  if (ratio === null || ratio <= 0) return null
-  return Math.ceil(tailleGroupe / ratio)
 }
 
 // ──────────────────────────────────────────────

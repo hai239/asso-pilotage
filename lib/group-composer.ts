@@ -2,9 +2,9 @@
 // Composition de groupes — algorithme du Lot 3
 // ──────────────────────────────────────────────
 // Prend en entrée la fiche descriptive d'un atelier (compétences ciblées,
-// tranche d'âge, taille de groupe, mode homogène/hétérogène) et la liste
-// des bénéficiaires (avec leurs notes du test initial), et produit un
-// brouillon de groupes que les collaboratrices pourront ajuster.
+// tranche d'âge, taille de groupe) et la liste des bénéficiaires (avec
+// leurs notes du test initial), et produit un brouillon de groupes que
+// les collaboratrices pourront ajuster.
 //
 // Principe de l'algorithme :
 //   1. On filtre les bénéficiaires : statut actif, âge dans la tranche,
@@ -14,15 +14,11 @@
 //      les thématiques cochées (pas une moyenne, pour garder l'information
 //      par dimension : deux profils avec la même moyenne mais des notes
 //      très différentes sur chaque axe ne se retrouvent PAS ensemble).
-//   4. Selon le mode :
-//      • Homogène (défaut) : on slice le tri en N groupes consécutifs.
-//      • Hétérogène : on distribue les bénéficiaires en round-robin.
-//   5. On calcule pour chaque groupe le nombre d'encadrants requis si
-//      l'atelier impose un ratio.
+//   4. On slice le tri en N groupes consécutifs (homogène).
 
 import type { Thematique, NotesPositionnement } from "./positionnement"
 import type { FicheAtelier } from "./atelier"
-import { encadrantsRequis, cycleForClasse, CYCLES, type CycleScolaire } from "./atelier"
+import { cycleForClasse, CYCLES, type CycleScolaire } from "./atelier"
 
 // ──────────────────────────────────────────────
 // Types publics
@@ -48,8 +44,6 @@ export interface GroupeBrouillon {
   /** Cycle scolaire du groupe (null pour les parents / hors cycle). */
   cycle: CycleScolaire | null
   beneficiaireIds: number[]
-  /** Encadrants requis selon le ratio de l'atelier — null si pas de ratio défini. */
-  encadrantsRequis: number | null
 }
 
 /** Poids appliqué à une thématique dans le tri du groupage.
@@ -58,7 +52,6 @@ export interface GroupeBrouillon {
 export type Pondaration = "principale" | "secondaire"
 
 export interface ParametresComposition {
-  mode: "homogène" | "hétérogène"
   tailleGroupeCible: number
   competencesCiblees: Thematique[]
   /** Pondération par thématique. Manquante = "secondaire". */
@@ -182,13 +175,6 @@ function sliceEnGroupes<T>(items: T[], nGroupes: number): T[][] {
   return result
 }
 
-/** Distribue une liste en N sous-listes en round-robin (mélange des niveaux). */
-function repartirRoundRobin<T>(items: T[], nGroupes: number): T[][] {
-  const result: T[][] = Array.from({ length: nGroupes }, () => [])
-  items.forEach((item, i) => result[i % nGroupes].push(item))
-  return result
-}
-
 /** Réordonne les thématiques cochées selon leur pondération.
  *  Les "principales" passent en tête → priorité dans le tri lexicographique. */
 function ordonnerParPoids(
@@ -236,7 +222,7 @@ function grouperParDispo(
 export function composerGroupes(
   atelier: Pick<
     FicheAtelier,
-    "audience" | "competencesCiblees" | "tailleGroupeCible" | "ratioEncadrement" | "mixerNiveaux" | "modeGroupage"
+    "audience" | "competencesCiblees" | "tailleGroupeCible" | "modeGroupage"
   > & { id: number; titre: string },
   beneficiaires: BeneficiairePourGroupage[],
   options: OptionsComposition = {},
@@ -313,7 +299,6 @@ export function composerGroupes(
       exclusStatut,
       outliers,
       parametres: {
-        mode: atelier.mixerNiveaux ? "hétérogène" : "homogène",
         tailleGroupeCible: taille,
         competencesCiblees: dims,
         ponderation: options.ponderation,
@@ -341,7 +326,6 @@ export function composerGroupes(
           nom: `${prefixe} · ${key}`,
           cycle,
           beneficiaireIds: membres.map(m => m.id),
-          encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, membres.length),
         })
         groupeIndex++
       }
@@ -356,16 +340,13 @@ export function composerGroupes(
       const scores = new Map(lot.map(b => [b.id, scoreComposite(b, dims, stats)]))
       const trie = [...lot].sort((a, b) => scores.get(b.id)! - scores.get(a.id)!)
       const nGroupes = Math.max(1, Math.ceil(trie.length / taille))
-      const repartition = atelier.mixerNiveaux
-        ? repartirRoundRobin(trie, nGroupes)
-        : sliceEnGroupes(trie, nGroupes)
+      const repartition = sliceEnGroupes(trie, nGroupes)
       repartition.forEach(membres => {
         groupes.push({
           id: `${atelier.id}-${cycle ?? "x"}-${groupeIndex}`,
           nom: `${prefixe} · Groupe ${groupeIndex}`,
           cycle,
           beneficiaireIds: membres.map(m => m.id),
-          encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, membres.length),
         })
         groupeIndex++
       })
@@ -400,7 +381,6 @@ export function composerGroupes(
     exclusStatut,
     outliers,
     parametres: {
-      mode: atelier.mixerNiveaux ? "hétérogène" : "homogène",
       tailleGroupeCible: taille,
       competencesCiblees: dims,
       ponderation: options.ponderation,
@@ -435,7 +415,6 @@ export function migrateBrouillon(raw: Partial<Brouillon> & { atelierId: number }
     exclusStatut:raw.exclusStatut?? [],
     outliers:    raw.outliers    ?? [],
     parametres: {
-      mode:              raw.parametres?.mode              ?? "homogène",
       tailleGroupeCible: raw.parametres?.tailleGroupeCible ?? 10,
       competencesCiblees:raw.parametres?.competencesCiblees?? [],
       ponderation:       raw.parametres?.ponderation,
