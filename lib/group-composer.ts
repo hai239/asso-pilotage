@@ -79,8 +79,6 @@ export interface Brouillon {
   groupes: GroupeBrouillon[]
   /** Bénéficiaires non placés : aucune note initiale renseignée. */
   aEvaluer: number[]
-  /** Bénéficiaires non placés : âge en dehors de [ageMin, ageMax]. */
-  horsTranche: number[]
   /** Bénéficiaires non placés : statut non actif. */
   exclusStatut: number[]
   /** Bénéficiaires non placés : moyenne hors des seuils noteMin/noteMax.
@@ -106,25 +104,68 @@ function ageOf(dateNaissance: string): number | null {
   return new Date().getFullYear() - an
 }
 
-/** Construit le vecteur de notes du bénéficiaire sur les thématiques ciblées.
- *  Une note manquante est traitée comme 0 pour le tri (mais elle compte dans
- *  le filtre "aEvaluer" — si TOUTES les notes sont null, on ne place pas). */
-function vecteurNotes(b: BeneficiairePourGroupage, dims: Thematique[]): number[] {
-  return dims.map(d => b.positionnementInitial[d] ?? 0)
-}
-
 /** Au moins une note renseignée sur les thématiques ciblées. */
 function aAuMoinsUneNote(b: BeneficiairePourGroupage, dims: Thematique[]): boolean {
   return dims.some(d => b.positionnementInitial[d] !== null)
 }
 
-/** Comparateur lexicographique multi-dimensions (descendant = forts d'abord).
- *  Garantit que deux bénéficiaires aux mêmes notes restent dans l'ordre stable. */
-function compareLex(a: number[], b: number[]): number {
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return b[i] - a[i]   // descendant
+/** Médiane d'une liste de notes (moyenne des deux valeurs centrales si effectif pair). */
+function mediane(notes: number[]): number {
+  if (notes.length === 0) return 0
+  const trie = [...notes].sort((a, b) => a - b)
+  const mid = Math.floor(trie.length / 2)
+  return trie.length % 2 === 0 ? (trie[mid - 1] + trie[mid]) / 2 : trie[mid]
+}
+
+/** Écart-type de population (pas d'échantillon, on a l'exhaustivité du lot) autour d'un centre donné. */
+function ecartType(notes: number[], centre: number): number {
+  if (notes.length === 0) return 0
+  const variance = notes.reduce((acc, n) => acc + (n - centre) ** 2, 0) / notes.length
+  return Math.sqrt(variance)
+}
+
+/** Médiane + écart-type de la population du lot, par compétence ciblée.
+ *  Sert à comparer les élèves ENTRE EUX sur une échelle commune, plutôt que
+ *  sur les points bruts : deux compétences n'ont pas forcément la même
+ *  dispersion dans la population (ex. compréhension écrite très étalée,
+ *  expression orale resserrée) — sommer les points bruts fait dominer
+ *  arbitrairement la compétence la plus dispersée. */
+function statsParCompetence(
+  lot: BeneficiairePourGroupage[],
+  dims: Thematique[],
+): Partial<Record<Thematique, { mediane: number; ecartType: number }>> {
+  const stats: Partial<Record<Thematique, { mediane: number; ecartType: number }>> = {}
+  for (const d of dims) {
+    const notes = lot
+      .map(b => b.positionnementInitial[d])
+      .filter((n): n is number => n !== null)
+    const med = mediane(notes)
+    stats[d] = { mediane: med, ecartType: ecartType(notes, med) }
   }
-  return 0
+  return stats
+}
+
+/** Score composite d'un bénéficiaire : moyenne, sur les compétences où il a
+ *  une note, de son écart à la médiane de la population exprimé en
+ *  écarts-types — `(note − médiane_pop) / écart-type_pop`. Rend les
+ *  compétences comparables entre elles avant de les combiner (cf. décision
+ *  produit : un score composé sur des points bruts ferait dominer la
+ *  compétence la plus dispersée dans la population). */
+function scoreComposite(
+  b: BeneficiairePourGroupage,
+  dims: Thematique[],
+  stats: Partial<Record<Thematique, { mediane: number; ecartType: number }>>,
+): number {
+  const scores = dims
+    .map(d => {
+      const note = b.positionnementInitial[d]
+      const s = stats[d]
+      if (note === null || !s) return null
+      return s.ecartType === 0 ? 0 : (note - s.mediane) / s.ecartType
+    })
+    .filter((s): s is number => s !== null)
+  if (scores.length === 0) return 0
+  return scores.reduce((a, s) => a + s, 0) / scores.length
 }
 
 /** Découpe une liste en N sous-listes consécutives de taille équilibrée. */
@@ -195,7 +236,7 @@ function grouperParDispo(
 export function composerGroupes(
   atelier: Pick<
     FicheAtelier,
-    "audience" | "competencesCiblees" | "ageMin" | "ageMax" | "tailleGroupeCible" | "ratioEncadrement" | "mixerNiveaux" | "modeGroupage"
+    "audience" | "competencesCiblees" | "tailleGroupeCible" | "ratioEncadrement" | "mixerNiveaux" | "modeGroupage"
   > & { id: number; titre: string },
   beneficiaires: BeneficiairePourGroupage[],
   options: OptionsComposition = {},
@@ -226,11 +267,13 @@ export function composerGroupes(
   }
 
   // ── 2. Tri des bénéficiaires en buckets ──
-  // Ordre des filtres : statut → âge → notes manquantes → outliers (note hors
-  // seuil) → éligibles. Chaque cas est rendu visible côté UI, rien n'est
-  // perdu silencieusement.
+  // Ordre des filtres : statut → notes manquantes → outliers (note hors
+  // seuil) → éligibles. La barrière d'âge se fait exclusivement par CYCLE
+  // SCOLAIRE (niveau de classe), plus loin — pas par tranche d'âge brute :
+  // un élève peut être décalé d'âge par rapport à sa classe (redoublement…),
+  // c'est la classe qui doit primer. Chaque cas exclu est rendu visible
+  // côté UI, rien n'est perdu silencieusement.
   const exclusStatut: number[] = []
-  const horsTranche:  number[] = []
   const aEvaluer:     number[] = []
   const outliers:     number[] = []
   const eligibles:    BeneficiairePourGroupage[] = []
@@ -238,16 +281,6 @@ export function composerGroupes(
   for (const b of beneficiaires) {
     if (b.statut !== "actif") {
       exclusStatut.push(b.id)
-      continue
-    }
-    const age = ageOf(b.dateNaissance)
-    if (
-      !ignoreAge &&
-      age !== null &&
-      ((atelier.ageMin !== null && age < atelier.ageMin) ||
-        (atelier.ageMax !== null && age > atelier.ageMax))
-    ) {
-      horsTranche.push(b.id)
       continue
     }
     // En mode "notes" seulement : exiger au moins une note + filtrer les outliers.
@@ -277,7 +310,6 @@ export function composerGroupes(
       generedAt: new Date().toISOString(),
       groupes: [],
       aEvaluer,
-      horsTranche,
       exclusStatut,
       outliers,
       parametres: {
@@ -314,8 +346,15 @@ export function composerGroupes(
         groupeIndex++
       }
     } else {
-      // Tri par notes puis découpe homogène (ou round-robin si hétérogène).
-      const trie = [...lot].sort((a, b) => compareLex(vecteurNotes(a, dims), vecteurNotes(b, dims)))
+      // Tri par score composite standardisé (médiane + écart-type de la
+      // population du lot, cf. scoreComposite) puis découpe homogène (ou
+      // round-robin si hétérogène). Les stats sont calculées sur CE lot
+      // uniquement (déjà borné par cycle scolaire) — comparer un élève à une
+      // population d'un autre cycle n'aurait pas de sens, ils ne seront de
+      // toute façon jamais regroupés ensemble.
+      const stats = statsParCompetence(lot, dims)
+      const scores = new Map(lot.map(b => [b.id, scoreComposite(b, dims, stats)]))
+      const trie = [...lot].sort((a, b) => scores.get(b.id)! - scores.get(a.id)!)
       const nGroupes = Math.max(1, Math.ceil(trie.length / taille))
       const repartition = atelier.mixerNiveaux
         ? repartirRoundRobin(trie, nGroupes)
@@ -358,7 +397,6 @@ export function composerGroupes(
     generedAt: new Date().toISOString(),
     groupes,
     aEvaluer,
-    horsTranche,
     exclusStatut,
     outliers,
     parametres: {
@@ -394,7 +432,6 @@ export function migrateBrouillon(raw: Partial<Brouillon> & { atelierId: number }
     generedAt:   raw.generedAt   ?? new Date().toISOString(),
     groupes:     raw.groupes     ?? [],
     aEvaluer:    raw.aEvaluer    ?? [],
-    horsTranche: raw.horsTranche ?? [],
     exclusStatut:raw.exclusStatut?? [],
     outliers:    raw.outliers    ?? [],
     parametres: {

@@ -21,7 +21,7 @@ import {
 } from "@/lib/group-composer"
 import SlideOver, { Field, Input, SaveButton, DeleteButton } from "@/components/SlideOver"
 import {
-  Shuffle, RotateCcw, CheckCircle2, AlertTriangle, Users,
+  Shuffle, RotateCcw, CheckCircle2, AlertTriangle,
   GraduationCap, UserCheck, Sparkles, Settings, X, Plus,
 } from "lucide-react"
 
@@ -593,10 +593,8 @@ export default function BrouillonGroupesTab(props: {
                 </div>
               )}
 
-              {/* Buckets — bénéficiaires non placés.
-                  Le bucket "hors tranche" ne fait pas sens pour les adultes
-                  (pas de notion d'âge pour les ateliers parents). */}
-              {!groupeValide && brouillon && (brouillon.aEvaluer.length + (atelier.audience === "parents" ? 0 : brouillon.horsTranche.length) + brouillon.outliers.length > 0) && (
+              {/* Buckets — bénéficiaires non placés. */}
+              {!groupeValide && brouillon && (brouillon.aEvaluer.length + brouillon.outliers.length > 0) && (
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                   {brouillon.aEvaluer.length > 0 && (
                     <BucketCard
@@ -605,19 +603,6 @@ export default function BrouillonGroupesTab(props: {
                       titre={`À évaluer (${brouillon.aEvaluer.length})`}
                       sousTitre="Aucune note initiale renseignée"
                       membres={brouillon.aEvaluer.map(id => benefById(id)).filter((b): b is Beneficiaire => !!b)}
-                    />
-                  )}
-                  {atelier.audience !== "parents" && brouillon.horsTranche.length > 0 && (
-                    <BucketCard
-                      color="slate"
-                      icon={<Users size={11} />}
-                      titre={`Hors tranche d'âge (${brouillon.horsTranche.length})`}
-                      sousTitre={
-                        atelier.ageMin !== null && atelier.ageMax !== null
-                          ? `Cible : ${atelier.ageMin}-${atelier.ageMax} ans`
-                          : "Bénéficiaires placés en attente"
-                      }
-                      membres={brouillon.horsTranche.map(id => benefById(id)).filter((b): b is Beneficiaire => !!b)}
                     />
                   )}
                   {brouillon.outliers.length > 0 && (
