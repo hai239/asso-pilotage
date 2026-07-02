@@ -1,66 +1,65 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────
-   Charte graphique AREA Nantes
-   Extraite de areanantes.fr — mai 2026
+   Charte graphique AREA Nantes — « Estuaire »
+   Palette Teal AREA · maj juillet 2026
+   Marque unifiée sur 3 couleurs :
+     Teal #159C99 · Vert forêt #1B6840 · Doré #D99A1E
+   Typo : Poppins (titres) + Inter (texte)
    ───────────────────────────────────────────── */
 
 :root {
   /* UI chrome */
-  --background: #f7f5f1;   /* crème très subtil, inspiré fond AREA */
-  --foreground: #0f172a;
+  --background: #f7f5f1;   /* crème AREA */
+  --foreground: #0f1e2b;   /* encre navy Estuaire */
   --surface: #ffffff;
-  --border: #e2e8f0;
-  --muted: #475569;
+  --border: #e7e2d9;       /* filet chaud */
+  --muted: #516170;
 
   /* ── Couleur brand AREA — teal principal ── */
-  --color-brand: #2bbfbf;
-  --color-brand-light: #e3f7f7;
-  --color-brand-dark: #1a9494;
+  --color-brand: #159c99;
+  --color-brand-light: #ddf3f2;
+  --color-brand-dark: #0c6c6a;
 
-  /* ── Modules — palette AREA ── */
+  /* ── Modules — palette Estuaire unifiée (teal / forêt / doré) ── */
 
-  /* Ateliers → teal AREA (couleur principale) */
-  --color-ateliers: #2bbfbf;
-  --color-ateliers-light: #e3f7f7;
-  --color-ateliers-dark: #1a9494;
+  /* Teal → ateliers, bénévoles, positionnement */
+  --color-ateliers: #159c99;
+  --color-ateliers-light: #ddf3f2;
+  --color-ateliers-dark: #0c6c6a;
 
-  /* Finances → vert forêt AREA */
+  --color-benevoles: #159c99;
+  --color-benevoles-light: #ddf3f2;
+  --color-benevoles-dark: #0c6c6a;
+
+  --color-positionnement: #159c99;
+  --color-positionnement-light: #ddf3f2;
+  --color-positionnement-dark: #0c6c6a;
+
+  /* Vert forêt → finances, familles */
   --color-finances: #1b6840;
-  --color-finances-light: #d8efe2;
-  --color-finances-dark: #145030;
+  --color-finances-light: #dbede3;
+  --color-finances-dark: #134d30;
 
-  /* Communication → jaune doré AREA */
-  --color-communication: #c49b1a;
-  --color-communication-light: #fef5d3;
-  --color-communication-dark: #9a7810;
+  --color-familles: #1b6840;
+  --color-familles-light: #dbede3;
+  --color-familles-dark: #134d30;
 
-  /* Absences → orange alerte (inchangé — couleur d'alerte universelle) */
-  --color-absences: #f59e0b;
-  --color-absences-light: #fef3c7;
-  --color-absences-dark: #d97706;
+  /* Doré → communication, absences, veille subventions */
+  --color-communication: #d99a1e;
+  --color-communication-light: #f8eccd;
+  --color-communication-dark: #8f6410;
 
-  /* Bénévoles → teal secondaire (conservé) */
-  --color-benevoles: #2bbfbf;
-  --color-benevoles-light: #e3f7f7;
-  --color-benevoles-dark: #1a9494;
+  --color-absences: #d99a1e;
+  --color-absences-light: #f8eccd;
+  --color-absences-dark: #8f6410;
 
-  /* Veille subventions → violet (distinct des modules métier existants) */
-  --color-subventions: #8b5cf6;
-  --color-subventions-light: #ede9fe;
-  --color-subventions-dark: #6d28d9;
+  --color-subventions: #d99a1e;
+  --color-subventions-light: #f8eccd;
+  --color-subventions-dark: #8f6410;
 
-  --color-alert: #ef4444;
-
-  /* Familles → violet */
-  --color-familles: #7c3aed;
-  --color-familles-light: #ede9fe;
-  --color-familles-dark: #5b21b6;
-
-  /* Positionnement → bleu indigo */
-  --color-positionnement: #4f46e5;
-  --color-positionnement-light: #e0e7ff;
-  --color-positionnement-dark: #3730a3;
+  /* Rouge fonctionnel — actions destructives / erreurs (hors charte de marque) */
+  --color-alert: #e4472b;
 }
 
 @theme inline {
@@ -110,14 +109,27 @@
 
   --color-alert: var(--color-alert);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* ── Arrondis Estuaire — plus généreux globalement ── */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+
+  /* ── Typographie Estuaire ── */
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-poppins);
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), system-ui, Arial, Helvetica, sans-serif;
+}
+
+/* Titres en Poppins (display Estuaire) */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-poppins), var(--font-inter), system-ui, sans-serif;
 }
 
 /* ── Accessibilité ── */
