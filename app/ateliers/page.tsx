@@ -28,7 +28,7 @@ import Link from "next/link"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
-  X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
+  X, Columns3, Check, Sparkles, Shuffle,
   ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
 } from "lucide-react"
 import SlideOver, {
@@ -755,7 +755,6 @@ function AudienceHubCards({
   const hubs: Array<{
     id: Audience
     label: string
-    sublabel: string
     Icon: typeof GraduationCap
     bgActive: string
     borderInactive: string
@@ -766,8 +765,7 @@ function AudienceHubCards({
   }> = [
     {
       id: "eleves",
-      label: "Ateliers enfants",
-      sublabel: "Élèves mineurs",
+      label: "Ateliers élèves",
       Icon: GraduationCap,
       bgActive: "bg-ateliers",
       borderInactive: "border-ateliers/30",
@@ -778,8 +776,7 @@ function AudienceHubCards({
     },
     {
       id: "parents",
-      label: "Ateliers parents",
-      sublabel: "Parents / adultes",
+      label: "Ateliers adultes",
       Icon: UserCheck,
       bgActive: "bg-communication",
       borderInactive: "border-communication/30",
@@ -820,10 +817,7 @@ function AudienceHubCards({
                 <h.Icon size={24} className={active ? "text-white" : h.iconColor} />
               </span>
               <div className="flex-1 min-w-0">
-                <p className={`text-[11px] font-semibold uppercase tracking-wider ${active ? "opacity-90" : "opacity-70"}`}>
-                  {h.sublabel}
-                </p>
-                <p className="text-lg font-bold mt-0.5">{h.label}</p>
+                <p className="text-lg font-bold">{h.label}</p>
                 <p className={`text-sm mt-2 ${active ? "opacity-95" : "opacity-80"}`}>
                   <span className="font-semibold tabular-nums">{c.ateliers}</span> atelier{c.ateliers > 1 ? "s" : ""}
                   <span className="mx-1.5 opacity-50">·</span>
@@ -2718,21 +2712,12 @@ export default function AteliersPage() {
                 )
               })}
             </div>
-            {sessionForm.competencesCiblees.length === 0 && (
-              <p className="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
-                <AlertTriangle size={11} /> Aucune compétence cochée — l&apos;auto-composition de groupes sera désactivée pour cet atelier.
-              </p>
-            )}
           </div>
 
           {/* ── Paramètres de groupage ── */}
           <div className="rounded-xl border border-border bg-surface/50 p-3">
             <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">
               Paramètres de groupage
-            </p>
-            <p className="text-[11px] text-muted mb-3">
-              Définissent comment l&apos;algorithme construira les groupes du brouillon.
-              {sessionForm.audience !== "parents" && " L'âge des bénéficiaires est géré automatiquement par tranches (6-9, 10-13, 14-18 ans)."}
             </p>
             <Field label="Taille de groupe cible (facultatif)">
               <Input
