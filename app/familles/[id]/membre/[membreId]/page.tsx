@@ -448,7 +448,7 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               Date_Naissance: membre.Date_Naissance, Telephone: membre.Telephone,
               WhatsApp: membre.WhatsApp, Email: membre.Email,
               Pays_Origine: membre.Pays_Origine, Langue_Maternelle: membre.Langue_Maternelle,
-              Contact_Principal: membre.Contact_Principal, Source_Orientation: membre.Source_Orientation,
+              Contact_Principal: membre.Contact_Principal,
             }); setSlideOpen(true) }}
             className="flex items-center gap-1.5 text-xs text-familles-dark hover:underline shrink-0"
           >
@@ -985,18 +985,13 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <Input value={String(form.Langue_Maternelle ?? "")} onChange={e => setForm(f => ({ ...f, Langue_Maternelle: e.target.value }))} />
             </Field>
           </FormRow>
-          <FormRow>
-            <Field label="Contact principal">
-              <Select value={String(form.Contact_Principal ?? "")} onChange={e => setForm(f => ({ ...f, Contact_Principal: e.target.value }))}>
-                <option value="">— Choisir —</option>
-                <option value="Oui">Oui</option>
-                <option value="Non">Non</option>
-              </Select>
-            </Field>
-            <Field label="Source d'orientation">
-              <Input value={String(form.Source_Orientation ?? "")} onChange={e => setForm(f => ({ ...f, Source_Orientation: e.target.value }))} />
-            </Field>
-          </FormRow>
+          <Field label="Contact principal">
+            <Select value={String(form.Contact_Principal ?? "")} onChange={e => setForm(f => ({ ...f, Contact_Principal: e.target.value }))}>
+              <option value="">— Choisir —</option>
+              <option value="Oui">Oui</option>
+              <option value="Non">Non</option>
+            </Select>
+          </Field>
           <SaveButton accent="familles" />
           <DeleteButton onClick={handleDelete} />
         </form>
