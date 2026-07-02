@@ -125,6 +125,11 @@ export async function appendRow(
     spreadsheetId: SPREADSHEET_ID,
     range: sheetName,
     valueInputOption: "USER_ENTERED",
+    // Sans ce flag, le mode par défaut ("OVERWRITE") peut mal détecter la fin
+    // du tableau sur certaines feuilles et écraser la dernière ligne écrite
+    // au lieu d'en ajouter une nouvelle (observé sur ASSIDUITE : deux appends
+    // successifs ciblaient la même ligne).
+    insertDataOption: "INSERT_ROWS",
     requestBody: { values: [row] },
   })
 }

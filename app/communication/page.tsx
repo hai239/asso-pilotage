@@ -80,7 +80,13 @@ interface SessionSlim {
   date: string
   beneficiaireIds: number[]
   benevoleIds: number[]
-  formatrice: string
+  intervenantIds: number[]
+}
+
+interface IntervenantSlim {
+  ID_Intervenant: string
+  Nom: string
+  Prenom: string
 }
 
 interface BenefSlim {
@@ -468,6 +474,7 @@ export default function CommunicationPage() {
 
   const [sessions, setSessions]           = useState<SessionSlim[]>([])
   const [beneficiaires, setBeneficiaires] = useState<BenefSlim[]>([])
+  const [intervenants, setIntervenants]   = useState<IntervenantSlim[]>([])
   const [generating, setGenerating]       = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
 
@@ -485,6 +492,10 @@ export default function CommunicationPage() {
     setIntegrations(load(STORAGE_INTEGRATIONS, integrationsInitial))
     setSessions(load(S_SESSIONS, []))
     setBeneficiaires(load(S_BENEFICIAIRES, []))
+    fetch("/api/sheets?action=getIntervenants")
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: IntervenantSlim[]) => setIntervenants(rows))
+      .catch(() => setIntervenants([]))
   }, [])
 
   function persistPosts(data: Post[]) { setPosts(data); localStorage.setItem(STORAGE_POSTS, JSON.stringify(data)) }
@@ -666,7 +677,11 @@ export default function CommunicationPage() {
       .map(bid => benevolesMock.liste.find(bv => bv.id === bid))
       .filter(Boolean)
       .map(bv => bv!.nom)
-    setForm(f => ({ ...f, sessionId: id, participants: { apprenantes, benevoles, formatrices: session.formatrice ? [session.formatrice] : [] } }))
+    const formatrices = session.intervenantIds
+      .map(iid => intervenants.find(iv => Number(iv.ID_Intervenant) === iid))
+      .filter((iv): iv is IntervenantSlim => Boolean(iv))
+      .map(iv => `${iv.Prenom} ${iv.Nom}`.trim())
+    setForm(f => ({ ...f, sessionId: id, participants: { apprenantes, benevoles, formatrices } }))
   }
 
   function removeApprenante(index: number) {
