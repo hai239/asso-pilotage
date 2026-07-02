@@ -1710,6 +1710,11 @@ export default function AteliersPage() {
   }
 
   const [tab, setTab] = useState<TabId>("ateliers")
+  // Le récap n'est pas encore fait pour les parents : si l'audience bascule
+  // dessus pendant qu'on est sur cet onglet, on retombe sur Ateliers.
+  useEffect(() => {
+    if (audience === "parents" && tab === "recap") setTab("ateliers")
+  }, [audience, tab])
   const [toast, setToast] = useState<{ message: string } | null>(null)
 
   // Auto-effacement du toast après 6 s
@@ -2263,7 +2268,7 @@ export default function AteliersPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg w-fit">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {TABS.filter(({ id }) => id !== "recap" || audience === "eleves").map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -2363,7 +2368,7 @@ export default function AteliersPage() {
       {tab === "intervenants" && (
         <IntervenantsTab intervenants={intervenants} onEdit={openEditIntervenant} onNew={openNewIntervenant} />
       )}
-      {tab === "recap" && <RecapEleveTab />}
+      {tab === "recap" && audience === "eleves" && <RecapEleveTab />}
 
       {/* ════════════════════════════════════════
           SLIDEOVER — Détails de l'atelier (lecture seule)
