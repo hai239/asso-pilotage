@@ -58,6 +58,12 @@
   --color-subventions-light: #f8eccd;
   --color-subventions-dark: #8f6410;
 
+  /* Rapports → vert sapin AREA (cohérent avec la vraie charte du document de sortie —
+     extraite du logo et des rapports d'activité réels de l'association) */
+  --color-rapports: #0b4f4b;
+  --color-rapports-light: #e0f2f1;
+  --color-rapports-dark: #073a37;
+
   /* Rouge fonctionnel — actions destructives / erreurs (hors charte de marque) */
   --color-alert: #e4472b;
 }
@@ -106,6 +112,10 @@
   --color-subventions: var(--color-subventions);
   --color-subventions-light: var(--color-subventions-light);
   --color-subventions-dark: var(--color-subventions-dark);
+
+  --color-rapports: var(--color-rapports);
+  --color-rapports-light: var(--color-rapports-light);
+  --color-rapports-dark: var(--color-rapports-dark);
 
   --color-alert: var(--color-alert);
 

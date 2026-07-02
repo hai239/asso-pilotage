@@ -405,6 +405,7 @@ function CategorieField({
               value={newType}
               onChange={e => setNewType(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addType() } }}
+              aria-label="Nouveau type d'atelier"
               placeholder="Nouveau type…"
               className="flex-1 px-2.5 py-1 text-xs rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
             />
@@ -486,6 +487,7 @@ function SelecteurBeneficiaires({
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
+                aria-label="Rechercher un nom"
                 placeholder="Rechercher un nom…"
                 className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-ateliers/30"
               />
@@ -594,6 +596,7 @@ function SelecteurIntervenants({
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
+                aria-label="Rechercher un nom"
                 placeholder="Rechercher un nom…"
                 className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-benevoles/30"
               />
@@ -2606,9 +2609,8 @@ export default function AteliersPage() {
                 onChange={c => setSessionForm(f => ({ ...f, categorie: c }))}
               />
             </Field>
-            <Field label="Groupe / niveau">
+            <Field label="Groupe / niveau" hint="ex. A1">
               <Input
-                placeholder="Ex : A1"
                 value={sessionForm.groupe}
                 onChange={e => setSessionForm(f => ({ ...f, groupe: e.target.value }))}
               />
@@ -2643,9 +2645,8 @@ export default function AteliersPage() {
               </Field>
             </FormRow>
           )}
-          <Field label="Salle">
+          <Field label="Salle" hint="ex. Salle A">
             <Input
-              placeholder="Salle A"
               value={sessionForm.salle}
               onChange={e => setSessionForm(f => ({ ...f, salle: e.target.value }))}
             />
@@ -2663,9 +2664,8 @@ export default function AteliersPage() {
               </Select>
             </Field>
             {/* ── Période concernée (champ libre) ── */}
-            <Field label="Période concernée">
+            <Field label="Période concernée" hint="ex. Vacances de printemps 2026">
               <Input
-                placeholder="Ex : Vacances de printemps 2026"
                 value={sessionForm.periode}
                 onChange={e => setSessionForm(f => ({ ...f, periode: e.target.value }))}
               />
@@ -2719,7 +2719,7 @@ export default function AteliersPage() {
             <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">
               Paramètres de groupage
             </p>
-            <Field label="Taille de groupe cible (facultatif)">
+            <Field label="Taille de groupe cible (facultatif)" hint="ex. 10">
               <Input
                 type="number" min={2} max={30} placeholder="10"
                 value={sessionForm.tailleGroupeCible ?? ""}
@@ -2826,9 +2826,8 @@ export default function AteliersPage() {
         width="lg"
       >
         <form onSubmit={e => { e.preventDefault(); handleSaveGroupe() }} className="flex flex-col gap-4">
-          <Field label="Nom" required>
+          <Field label="Nom" required hint="ex. Groupe A – Débutants">
             <Input
-              placeholder="Ex : Groupe A – Débutants"
               value={groupeForm.nom}
               onChange={e => setGroupeForm(f => ({ ...f, nom: e.target.value }))}
             />
@@ -2862,9 +2861,8 @@ export default function AteliersPage() {
               </Select>
             </Field>
           </FormRow>
-          <Field label="Description">
+          <Field label="Description" hint="Critères de composition du groupe">
             <Textarea
-              placeholder="Critères de composition du groupe…"
               value={groupeForm.description}
               onChange={e => setGroupeForm(f => ({ ...f, description: e.target.value }))}
             />
@@ -2975,9 +2973,8 @@ export default function AteliersPage() {
         width="md"
       >
         <form onSubmit={e => { e.preventDefault(); handleSaveSeance() }} className="flex flex-col gap-4">
-          <Field label="Nom de la séance">
+          <Field label="Nom de la séance" hint="ex. Séance 3 — lecture à voix haute">
             <Input
-              placeholder="Ex : Séance 3 — lecture à voix haute"
               value={seanceForm.nom}
               onChange={e => setSeanceForm(f => ({ ...f, nom: e.target.value }))}
             />
@@ -3064,6 +3061,7 @@ export default function AteliersPage() {
                         step="0.5"
                         value={entry.heures}
                         onChange={e => setHeuresIntervenantSeance(entry.id, e.target.value)}
+                        aria-label={`Heures pour ${iv.Prenom} ${iv.Nom}`}
                         placeholder="0"
                         className="w-16 px-2 py-1 text-sm rounded-lg border border-border bg-surface text-right focus:outline-none focus:ring-2 focus:ring-ateliers/30"
                       />

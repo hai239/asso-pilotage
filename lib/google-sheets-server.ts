@@ -16,7 +16,16 @@ export function getSheetsClient() {
 // Dossier Drive "fiches-inscription" (partagé avec le compte de service)
 export const FICHES_FOLDER_ID = "1E5KdJqdbkrnjJEMtk2NpW-1RJdB28SOX"
 
-function getDriveClient() {
+// Dossiers Drive du module Rapports (à créer et partager en Éditeur avec le compte de
+// service — voir CLAUDE.md § Module Rapports). Tant que ces variables sont vides, la
+// synchronisation Slides est ignorée (best-effort côté lib/rapports-slides-api.ts).
+export const RAPPORTS_BROUILLONS_FOLDER_ID = process.env.GOOGLE_DRIVE_RAPPORTS_BROUILLONS_FOLDER_ID ?? ""
+export const RAPPORTS_ARCHIVES_FOLDER_ID = process.env.GOOGLE_DRIVE_RAPPORTS_ARCHIVES_FOLDER_ID ?? ""
+// Bibliothèque de templates (voir CLAUDE.md § Module Rapports) : dossier Drive dédié listant
+// de vrais Google Slides à proposer comme templates de style pour tout le deck.
+export const RAPPORTS_TEMPLATES_FOLDER_ID = process.env.GOOGLE_DRIVE_RAPPORTS_TEMPLATES_FOLDER_ID ?? ""
+
+export function getDriveClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -51,6 +60,44 @@ export async function makeFilePublic(fileId: string): Promise<string> {
 export async function deleteDriveFile(fileId: string): Promise<void> {
   const drive = getDriveClient()
   await drive.files.delete({ fileId, supportsAllDrives: true })
+}
+
+/** Déplace un fichier Drive d'un dossier vers un autre (ex. Brouillons → Archives). */
+export async function moveDriveFile(fileId: string, fromFolderId: string, toFolderId: string): Promise<void> {
+  const drive = getDriveClient()
+  await drive.files.update({
+    fileId,
+    addParents: toFolderId,
+    removeParents: fromFolderId,
+    supportsAllDrives: true,
+  })
+}
+
+/** Liste les fichiers d'un type donné dans un dossier Drive (ex. les Google Slides du dossier
+ * Templates). Renvoie un tableau vide si le dossier n'est pas configuré/accessible. */
+export async function listerFichiersDriveDossier(
+  folderId: string,
+  mimeType: string
+): Promise<{ id: string; nom: string }[]> {
+  if (!folderId) return []
+  const drive = getDriveClient()
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and mimeType='${mimeType}' and trashed=false`,
+    fields: "files(id, name)",
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  })
+  return (res.data.files ?? []).map((f) => ({ id: f.id ?? "", nom: f.name ?? "Sans nom" }))
+}
+
+/** Exporte un Google Slides (ou tout fichier Google Workspace) en PDF via l'API Drive native. */
+export async function exportDriveFileAsPdf(fileId: string): Promise<Buffer> {
+  const drive = getDriveClient()
+  const res = await drive.files.export(
+    { fileId, mimeType: "application/pdf" },
+    { responseType: "arraybuffer" }
+  )
+  return Buffer.from(res.data as ArrayBuffer)
 }
 
 /** Upload un fichier (base64) dans un dossier Drive donné. Renvoie le lien Drive. */

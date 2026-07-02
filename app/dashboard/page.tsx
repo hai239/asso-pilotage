@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Heart, LogOut, UserCircle, Search,
-  UserCheck, BarChart2, ClipboardCheck, BookOpen, Megaphone, UserCog, GraduationCap, StickyNote,
+  UserCheck, BarChart2, ClipboardCheck, BookOpen, Megaphone, UserCog, GraduationCap, StickyNote, List,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { moduleForPath } from "@/lib/modules"
@@ -34,6 +34,7 @@ const modules: ModuleCard[] = [
   { href: "/positionnement",     label: "Test de positionnement", sub: "Génération de tests",            icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/notes",              label: "Notes",                  sub: "Saisie des évaluations",         icon: StickyNote,     accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/communication",      label: "Communication",          sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light",  iconClass: "text-communication-dark" },
+  { href: "/rapports",           label: "Rapports",               sub: "Génération de rapports d'activité", icon: List,        accent: "bg-rapports-light",       iconClass: "text-rapports-dark" },
   { href: "/membres",            label: "Équipe",                 sub: "Annuaire de l'équipe",           icon: UserCog,        accent: "bg-slate-100",            iconClass: "text-slate-700" },
 ]
 
