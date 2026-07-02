@@ -17,6 +17,7 @@ import { moduleForPath } from "@/lib/modules"
 type ModuleCard = {
   href: string
   label: string
+  sub: string
   icon: typeof Heart
   accent: string
   iconClass: string
@@ -25,15 +26,15 @@ type ModuleCard = {
 
 // Ordre + intitulés repris à l'identique de la section « Opérationnel » de la sidebar.
 const modules: ModuleCard[] = [
-  { href: "/emargement",         label: "Émargement",             icon: ClipboardCheck, accent: "bg-ateliers-light",       iconClass: "text-ateliers-dark" },
-  { href: "/assiduite",          label: "Assiduité",              icon: BarChart2,      accent: "bg-absences-light",       iconClass: "text-absences-dark" },
-  { href: "/veille-subventions", label: "Veille subventions",     icon: Search,         accent: "bg-subventions-light",    iconClass: "text-subventions-dark" },
-  { href: "/ateliers",           label: "Ateliers",               icon: BookOpen,       accent: "bg-ateliers-light",       iconClass: "text-ateliers-dark" },
-  { href: "/familles",           label: "Familles",               icon: UserCheck,      accent: "bg-familles-light",       iconClass: "text-familles-dark" },
-  { href: "/positionnement",     label: "Test de positionnement", icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
-  { href: "/notes",              label: "Notes",                  icon: StickyNote,     accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
-  { href: "/communication",      label: "Communication",          icon: Megaphone,      accent: "bg-communication-light",  iconClass: "text-communication-dark" },
-  { href: "/membres",            label: "Équipe",                 icon: UserCog,        accent: "bg-slate-100",            iconClass: "text-slate-700" },
+  { href: "/emargement",         label: "Émargement",             sub: "Présences par séance",           icon: ClipboardCheck, accent: "bg-ateliers-light",       iconClass: "text-ateliers-dark" },
+  { href: "/assiduite",          label: "Assiduité",              sub: "Présences, décrochage",          icon: BarChart2,      accent: "bg-absences-light",       iconClass: "text-absences-dark" },
+  { href: "/veille-subventions", label: "Veille subventions",     sub: "Financements, appels à projets", icon: Search,         accent: "bg-subventions-light",    iconClass: "text-subventions-dark" },
+  { href: "/ateliers",           label: "Ateliers",               sub: "Planning, groupes",              icon: BookOpen,       accent: "bg-ateliers-light",       iconClass: "text-ateliers-dark" },
+  { href: "/familles",           label: "Familles",               sub: "Bénéficiaires, paiements, docs", icon: UserCheck,      accent: "bg-familles-light",       iconClass: "text-familles-dark" },
+  { href: "/positionnement",     label: "Test de positionnement", sub: "Génération de tests",            icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
+  { href: "/notes",              label: "Notes",                  sub: "Saisie des évaluations",         icon: StickyNote,     accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
+  { href: "/communication",      label: "Communication",          sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light",  iconClass: "text-communication-dark" },
+  { href: "/membres",            label: "Équipe",                 sub: "Annuaire de l'équipe",           icon: UserCog,        accent: "bg-slate-100",            iconClass: "text-slate-700" },
 ]
 
 function todayFr() {
@@ -99,7 +100,7 @@ export default function DashboardPage() {
       {/* Grille de modules */}
       <h2 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Opérationnel</h2>
       <nav aria-label="Opérationnel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {cards.map(({ href, label, icon: Icon, accent, iconClass }) => (
+        {cards.map(({ href, label, sub, icon: Icon, accent, iconClass }) => (
           <Link
             key={href}
             href={href}
@@ -108,7 +109,10 @@ export default function DashboardPage() {
             <span className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${accent} ${iconClass}`}>
               <Icon size={22} />
             </span>
-            <span className="min-w-0 font-semibold text-foreground">{label}</span>
+            <span className="min-w-0">
+              <span className="block font-semibold text-foreground">{label}</span>
+              <span className="block text-sm text-muted truncate">{sub}</span>
+            </span>
           </Link>
         ))}
       </nav>
