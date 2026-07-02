@@ -576,10 +576,15 @@ ajoutée dans la table `DOCUMENTS JOINTS`.
 ```
 GOOGLE_CLIENT_EMAIL=...@....iam.gserviceaccount.com   # compte de service
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-GEMINI_API_KEY=...                                    # OCR bulletins d'inscription (Google AI Studio)
+GEMINI_API_KEY=...                                    # IA : OCR, posts, positionnement, Rapports (Google AI Studio)
+# Module Rapports — 3 dossiers Drive dédiés (ID lisible dans l'URL du dossier) :
+GOOGLE_DRIVE_RAPPORTS_BROUILLONS_FOLDER_ID=...        # où sont créés les rapports en cours (Slides "brouillons")
+GOOGLE_DRIVE_RAPPORTS_ARCHIVES_FOLDER_ID=...          # où un rapport est déplacé une fois validé/archivé
+GOOGLE_DRIVE_RAPPORTS_TEMPLATES_FOLDER_ID=...         # bibliothèque de modèles Slides proposés à l'import
 ```
-- Scopes utilisés : `spreadsheets` + `drive`.
-- Le compte de service doit avoir **accès Éditeur** au Sheet `BDD_Asso_CRM` et aux 4 dossiers Drive.
+- Scopes utilisés : `spreadsheets` + `drive` + `presentations` (module Rapports).
+- Activer **Google Slides API** sur le projet Google Cloud (module Rapports), en plus de Sheets + Drive.
+- Le compte de service doit avoir **accès Éditeur** au Sheet `BDD_Asso_CRM`, aux 4 dossiers Drive des documents Familles, et aux **3 dossiers Drive du module Rapports** (Brouillons / Archives / Templates).
 - `NEXT_PUBLIC_SHEETS_API_URL` / `NEXT_PUBLIC_SHEETS_SCRIPT_URL` : **obsolètes**, ne plus utiliser.
 
 ### Helpers de mapping (`lib/sheets-api.ts`)
@@ -710,12 +715,13 @@ Distinct de "Sauvegarder" : synchronise une dernière fois, déplace le fichier 
 2. Les partager avec le compte de service (`GOOGLE_CLIENT_EMAIL`) — **Éditeur** pour
    Brouillons/Archives (comme les 4 dossiers Documents du module Familles), **Lecteur** suffit
    pour Templates (lecture seule).
-3. Ajouter dans `.env.local` + Vercel :
+3. Ajouter dans `.env.local` + Vercel (ID lisible dans l'URL du dossier, `drive.google.com/drive/folders/<ID>`) :
    ```
-   GOOGLE_DRIVE_RAPPORTS_BROUILLONS_FOLDER_ID=...
-   GOOGLE_DRIVE_RAPPORTS_ARCHIVES_FOLDER_ID=...
-   GOOGLE_DRIVE_RAPPORTS_TEMPLATES_FOLDER_ID=...
+   GOOGLE_DRIVE_RAPPORTS_BROUILLONS_FOLDER_ID=...   # création des rapports en cours (Slides "brouillons")
+   GOOGLE_DRIVE_RAPPORTS_ARCHIVES_FOLDER_ID=...     # destination d'un rapport validé/archivé
+   GOOGLE_DRIVE_RAPPORTS_TEMPLATES_FOLDER_ID=...    # bibliothèque de modèles Slides proposés à l'import
    ```
+4. Activer **Google Slides API** sur le projet Google Cloud (en plus de Sheets + Drive).
    Scope Google supplémentaire utilisé : `https://www.googleapis.com/auth/presentations`
    (API Slides — doit être activée sur le même projet Google Cloud que Sheets/Drive).
 

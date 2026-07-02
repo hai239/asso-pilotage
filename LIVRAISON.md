@@ -171,8 +171,16 @@ Tout push sur la branche `main` déclenche un déploiement automatique sur Verce
 | `SUPABASE_SERVICE_ROLE_KEY` | Oui (gestion comptes) | **OUI** | Clé service_role Supabase — **jamais** en `NEXT_PUBLIC_` |
 | `GOOGLE_CLIENT_EMAIL` | Oui (Familles/Assiduité) | non | Compte de service Google (Sheets + Drive) |
 | `GOOGLE_PRIVATE_KEY` | Oui (Familles/Assiduité) | **OUI** | Clé privée du compte de service |
-| `GEMINI_API_KEY` | Oui (génération IA posts + OCR bulletins) | **OUI** | Clé Google Gemini — obtenir sur [Google AI Studio](https://aistudio.google.com/) |
+| `GEMINI_API_KEY` | Oui (IA posts, OCR bulletins, positionnement, **Rapports**) | **OUI** | Clé Google Gemini — obtenir sur [Google AI Studio](https://aistudio.google.com/) |
+| `GOOGLE_DRIVE_RAPPORTS_BROUILLONS_FOLDER_ID` | Oui (module Rapports) | non | ID du dossier Drive où sont **créés les rapports en cours** (présentations Google Slides « brouillons »). C'est là qu'atterrit chaque nouveau rapport généré. |
+| `GOOGLE_DRIVE_RAPPORTS_ARCHIVES_FOLDER_ID` | Oui (module Rapports) | non | ID du dossier Drive où un rapport est **déplacé quand il est validé/archivé** (depuis le dossier Brouillons). |
+| `GOOGLE_DRIVE_RAPPORTS_TEMPLATES_FOLDER_ID` | Oui (module Rapports) | non | ID du dossier Drive servant de **bibliothèque de modèles** : les Google Slides qui s'y trouvent sont proposés à l'import comme templates de style. |
 | `GOOGLE_SHEET_ID` | Non | non | Requis uniquement par les scripts de seed (l'app utilise l'ID en dur) |
+
+> **Module Rapports — prérequis Google supplémentaires** :
+> 1. Activer **Google Slides API** sur le projet Google Cloud (en plus de Sheets + Drive).
+> 2. Créer 3 dossiers Drive (Brouillons / Archives / Templates), récupérer leur **ID** (dans l'URL du dossier : `drive.google.com/drive/folders/<ID>`) et le renseigner dans la variable correspondante.
+> 3. Partager **chacun** de ces 3 dossiers avec le `GOOGLE_CLIENT_EMAIL` en rôle **Éditeur** (le compte de service doit pouvoir y créer/déplacer/lister des fichiers).
 
 > **En local** : créer un `.env.local` à la racine (voir `.env.example`). Ce fichier est ignoré par git (`.env*`, sauf `!.env.example`).
 > Les anciennes variables `NEXT_PUBLIC_SHEETS_SCRIPT_URL` / `NEXT_PUBLIC_SHEETS_API_URL` sont **obsolètes**.
