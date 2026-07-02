@@ -164,7 +164,7 @@ async function uploadFichier(sheets: Sheets, body: Record<string, unknown>) {
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `DOCUMENTS JOINTS!A${ligne}`,
-    valueInputOption: "USER_ENTERED",
+    valueInputOption: "RAW",
     requestBody: { values: [row] },
   })
 
@@ -271,7 +271,7 @@ async function addPost(sheets: Sheets, data: Record<string, unknown>) {
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `CONTENUS!A${ligne}`,
-    valueInputOption: "USER_ENTERED",
+    valueInputOption: "RAW",
     requestBody: { values: [row] },
   })
   return { ok: true, id }

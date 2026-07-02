@@ -137,7 +137,7 @@ export async function appendRow(
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
     range: sheetName,
-    valueInputOption: "USER_ENTERED",
+    valueInputOption: "RAW",
     requestBody: { values: [row] },
   })
 }
@@ -166,7 +166,7 @@ export async function updateRowById(
       return sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: rangeA1,
-        valueInputOption: "USER_ENTERED",
+        valueInputOption: "RAW",
         requestBody: { values: [[val ?? ""]] },
       })
     })
