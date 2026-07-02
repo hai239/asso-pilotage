@@ -1,6 +1,6 @@
 # Asso Pilotage
 
-Dashboard de pilotage pour une association de formation numérique (Ada Tech School).
+Dashboard de pilotage pour une association de formation numérique.
 **Next.js 16.2.6 · React 19 · Tailwind v4 · TypeScript**
 Auth **Supabase** · données **Google Sheets** (API REST v4 — Familles, Assiduité, **Ateliers**) + `localStorage` (autres modules) · IA **Anthropic** (posts) & **Gemini** (OCR bulletins)
 
