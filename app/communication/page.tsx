@@ -539,6 +539,7 @@ export default function CommunicationPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [postsLoading, setPostsLoading] = useState(true)
   const [postsError, setPostsError] = useState<string | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
   const [slideOpen, setSlideOpen] = useState(false)
   const [editing, setEditing] = useState<Post | null>(null)
   const [form, setForm] = useState<Omit<Post, "id">>(emptyPost())
@@ -555,6 +556,7 @@ export default function CommunicationPage() {
   const [intervenants, setIntervenants]   = useState<IntervenantSlim[]>([])
   const [generating, setGenerating]       = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
+  const [mediaError, setMediaError]       = useState<string | null>(null)
 
   const loadPosts = useCallback(async () => {
     setPostsLoading(true)
@@ -615,17 +617,25 @@ export default function CommunicationPage() {
 
   async function changeStatus(id: number, status: ValidationStatus) {
     const prev = posts.find(p => p.id === id)
+    if (!prev) return
+    const prevRejected = rejectedIds
     // Dot rouge : allumé quand "à valider" → "brouillon", éteint dès que le post quitte brouillon
-    if (status === "brouillon" && prev?.statut === "à valider") {
+    if (status === "brouillon" && prev.statut === "à valider") {
       persistRejected([...rejectedIds, id])
     } else if (status !== "brouillon" && rejectedIds.includes(id)) {
       persistRejected(rejectedIds.filter(rid => rid !== id))
     }
+    setStatusError(null)
     setPosts(posts.map((p) => p.id === id ? { ...p, statut: status } : p))
     try {
       await apiUpdatePost(id, { statut: status })
     } catch (e) {
       console.error("Échec mise à jour du statut (Google Sheets)", e)
+      // Le Sheet n'a pas été mis à jour : on annule la mise à jour optimiste
+      // pour ne pas afficher un statut qui n'existe pas côté serveur.
+      setPosts(posts.map((p) => p.id === id ? { ...p, statut: prev.statut } : p))
+      persistRejected(prevRejected)
+      setStatusError(`Échec de la mise à jour du statut de « ${prev.titre} ». Réessayez.`)
     }
   }
 
@@ -757,9 +767,17 @@ export default function CommunicationPage() {
 
   // Un seul média par type (image / vidéo) : un nouvel ajout remplace le précédent du même type,
   // pour correspondre aux colonnes "Image" / "Vidéo" (singulières) de la feuille CONTENUS.
+  // ~3 Mo brut ≈ 4 Mo encodés en base64, sous le plafond Vercel (~4,5 Mo/requête, voir CLAUDE.md).
+  const MAX_MEDIA_SIZE = 3 * 1024 * 1024
+
   function handleMediaFiles(files: FileList | null) {
     if (!files) return
+    setMediaError(null)
     Array.from(files).forEach(file => {
+      if (file.size > MAX_MEDIA_SIZE) {
+        setMediaError(`« ${file.name} » dépasse la taille maximale autorisée (3 Mo).`)
+        return
+      }
       const type: "image" | "video" = file.type.startsWith("image/") ? "image" : "video"
       const reader = new FileReader()
       reader.onload = async (e) => {
@@ -780,9 +798,10 @@ export default function CommunicationPage() {
           }))
         } catch (err) {
           console.error("Échec upload média (Google Drive)", err)
+          setMediaError(`Échec de l'upload de « ${file.name} ». Réessayez avec un fichier plus léger.`)
           setForm(f => ({
             ...f,
-            media: (f.media ?? []).map(m => (m.type === type && m.nom === file.name) ? { ...m, uploading: false } : m),
+            media: (f.media ?? []).filter(m => !(m.type === type && m.nom === file.name)),
           }))
         }
       }
@@ -969,6 +988,9 @@ export default function CommunicationPage() {
               <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center gap-2 text-xs font-medium text-muted border border-dashed border-border rounded-xl px-4 py-3 w-full hover:border-slate-400 hover:text-foreground transition-colors">
                 <Plus size={13} /> Ajouter des images ou vidéos
               </button>
+              {mediaError && (
+                <p className="text-[11px] text-alert bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{mediaError}</p>
+              )}
             </div>
           </Field>
 
@@ -1169,6 +1191,13 @@ export default function CommunicationPage() {
         <div className="mb-6 text-sm text-alert bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
           {postsError}
           <button onClick={loadPosts} className="shrink-0 text-xs font-medium underline hover:no-underline">Réessayer</button>
+        </div>
+      )}
+
+      {statusError && (
+        <div className="mb-6 text-sm text-alert bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+          {statusError}
+          <button onClick={() => setStatusError(null)} className="shrink-0 text-xs font-medium underline hover:no-underline">Fermer</button>
         </div>
       )}
 

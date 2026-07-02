@@ -8,6 +8,11 @@ import {
 
 type Sheets = ReturnType<typeof getSheetsClient>
 
+// Nom exact de la colonne PERSONNE portant le droit à l'image — source unique pour éviter
+// qu'une variante orthographique (accent, apostrophe) désynchronise lecture/écriture et
+// désactive silencieusement le floutage.
+const COL_DROIT_IMAGE = "Droit a l'image"
+
 // ── Réponses ──────────────────────────────────────────────
 
 function ok(data: unknown) {
@@ -586,7 +591,7 @@ async function getBeneficiaires(sheets: Sheets, audience?: string) {
         Disponibilite: lastInsc ? (lastInsc["Disponibilite"] ?? "") : "",
         Type_Apprenant: lastInsc ? (lastInsc["Type apprenant"] ?? "") : "",
         Niveau_CECRL: evalInitiale ? (evalInitiale["Niveau attribue"] ?? "") : "",
-        Droit_Image: p["Droit a l'image"] ?? "",
+        Droit_Image: p[COL_DROIT_IMAGE] ?? "",
         notes: {
           comprehensionEcrite: numOrNull(evalInitiale?.["Note comprehension ecrite"]),
           comprehensionOrale:  numOrNull(evalInitiale?.["Note comprehension orale"]),
@@ -754,7 +759,7 @@ async function addMembre(sheets: Sheets, data: Record<string, unknown>) {
     "Email": data.Email ?? "",
     "Pays d'origine": data.Pays_Origine ?? "",
     "Langue maternelle": data.Langue_Maternelle ?? "",
-    "Droit a l'image": data.Droit_Image ?? "",
+    [COL_DROIT_IMAGE]: data.Droit_Image ?? "",
     "Charte d'engagement": data.Charte ?? "",
     "Beneficiaire": data.Beneficiaire ?? "",
     "Commentaire": data.Notes ?? "",
@@ -796,7 +801,7 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
   if (data.Email !== undefined)            pmap["Email"] = data.Email
   if (data.Pays_Origine !== undefined)     pmap["Pays d'origine"] = data.Pays_Origine
   if (data.Langue_Maternelle !== undefined) pmap["Langue maternelle"] = data.Langue_Maternelle
-  if (data.Droit_Image !== undefined)      pmap["Droit a l'image"] = data.Droit_Image
+  if (data.Droit_Image !== undefined)      pmap[COL_DROIT_IMAGE] = data.Droit_Image
   if (data.Charte !== undefined)           pmap["Charte d'engagement"] = data.Charte
   if (data.Beneficiaire !== undefined)     pmap["Beneficiaire"] = data.Beneficiaire
   if (data.Notes !== undefined)            pmap["Commentaire"] = data.Notes
@@ -1155,7 +1160,7 @@ function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unkn
     Telephone: p["Telephone"],
     Email: p["Email"],
     WhatsApp: "",
-    Droit_Image: p["Droit a l'image"],
+    Droit_Image: p[COL_DROIT_IMAGE],
     Charte: p["Charte d'engagement"],
     Beneficiaire: p["Beneficiaire"],
     Statut_Inscription: d ? d["Statut"] : "",

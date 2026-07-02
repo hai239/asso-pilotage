@@ -127,17 +127,29 @@ export async function ensureColumns(
   })
 }
 
+/** Sérialise une valeur pour une écriture USER_ENTERED : Sheets interprète normalement
+ *  une chaîne comme un nombre ("150" → 150), ce qui est voulu pour les montants. Mais
+ *  ça fait sauter les zéros initiaux d'un numéro de téléphone ("0612345678" → 612345678).
+ *  On force donc le texte (préfixe apostrophe, convention Sheets) uniquement pour les
+ *  chaînes qui commencent par un zéro suivi d'un chiffre — les montants ne matchent pas
+ *  ce motif, ils restent donc de vrais nombres dans la feuille. */
+function formatCellValue(value: unknown): string {
+  if (value === undefined || value === null) return ""
+  const str = String(value)
+  return /^0\d/.test(str) ? `'${str}` : str
+}
+
 export async function appendRow(
   sheets: Sheets,
   sheetName: string,
   obj: Record<string, unknown>
 ): Promise<void> {
   const headers = await getHeaders(sheets, sheetName)
-  const row = headers.map((h) => (obj[h] !== undefined ? String(obj[h]) : ""))
+  const row = headers.map((h) => formatCellValue(obj[h]))
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
     range: sheetName,
-    valueInputOption: "RAW",
+    valueInputOption: "USER_ENTERED",
     // Sans ce flag, le mode par défaut ("OVERWRITE") peut mal détecter la fin
     // du tableau et écraser la dernière ligne (observé sur ASSIDUITE).
     insertDataOption: "INSERT_ROWS",
@@ -169,8 +181,8 @@ export async function updateRowById(
       return sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: rangeA1,
-        valueInputOption: "RAW",
-        requestBody: { values: [[val ?? ""]] },
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [[formatCellValue(val)]] },
       })
     })
     .filter(Boolean)
