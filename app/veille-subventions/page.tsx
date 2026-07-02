@@ -12,14 +12,18 @@
 //  lib/veille-subventions.ts ; les cellules sont dans _components/cells.tsx.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardCheck, ExternalLink, List, RotateCcw, Search, X } from "lucide-react"
 import {
   EMBED_URL,
   OPEN_URL,
+  STATUTS_AVEC_URGENCE,
+  STATUT_VALUES,
+  daysUntil,
   formatMontant,
   isBilanChecked,
   resolveColumns,
+  statutBadgeClasses,
   type ResolvedColumns,
   type ResponsablesResponse,
   type SheetErrorResponse,
@@ -86,6 +90,10 @@ export default function VeilleSubventionsPage() {
   const [search, setSearch] = useState("")
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({})
   const [sort, setSort] = useState<SortState>(null)
+  // Filtre « niveau » de l'encadré d'alertes (1 = deadlines semaine, 2 = ≤ 30 j,
+  // 3 = bilans à faire). Prédicat dédié car les niveaux 1/2 filtrent sur une
+  // plage de dates, non exprimable par les filtres de colonnes.
+  const [activeLevel, setActiveLevel] = useState<1 | 2 | 3 | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [pending, setPending] = useState<Record<string, true>>({})
@@ -172,11 +180,20 @@ export default function VeilleSubventionsPage() {
     return result
   }, [data, cols])
 
-  const anyFilterActive = Object.values(columnFilters).some((v) => v && v.length > 0)
-
   const filtered = useMemo(() => {
     if (!data) return []
     const q = search.toLowerCase().trim()
+    // Contexte du filtre « niveau » (calculé une fois, réutilisé par ligne).
+    const norm = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim()
+    const urgencySet = new Set(STATUTS_AVEC_URGENCE.map(norm))
+    const acceptedSet = new Set(["Accepté en attente de paiement", "Accepté et payé"].map(norm))
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const daysUntilSunday = (7 - today.getDay()) % 7
+    const scol = cols?.statut
+    const dcol = cols?.dateLimite
+    const bcol = cols?.bilan
     return data.rows.filter((r) => {
       // Filtres de colonnes : ET entre colonnes, OU à l'intérieur d'une colonne
       for (const key of FILTER_KEYS) {
@@ -189,13 +206,141 @@ export default function VeilleSubventionsPage() {
           : ((r[colName] ?? "").trim() || EMPTY_FILTER)
         if (!sel.includes(v)) return false
       }
+      // Filtre « niveau » de l'encadré d'alertes
+      if (activeLevel) {
+        const st = scol ? norm(r[scol] ?? "") : ""
+        if (activeLevel === 3) {
+          // Acceptées (attente/payé) dont le bilan n'est pas coché
+          if (!acceptedSet.has(st)) return false
+          if (bcol && isBilanChecked(r[bcol])) return false
+        } else {
+          // Niveaux 1 & 2 : statuts avec urgence + échéance à venir dans la fenêtre
+          if (!urgencySet.has(st)) return false
+          const days = dcol ? daysUntil(r[dcol]) : null
+          if (days === null || days < 0) return false
+          if (days > (activeLevel === 1 ? daysUntilSunday : 30)) return false
+        }
+      }
       if (q && !Object.values(r).join(" ").toLowerCase().includes(q)) return false
       return true
     })
-  }, [data, cols, search, columnFilters])
+  }, [data, cols, search, columnFilters, activeLevel])
+
+  // Compteurs par statut (sur TOUTES les lignes, pas le filtre courant) : vue
+  // d'ensemble du pipeline. Ordre = STATUT_VALUES (Nouveau → Hors délai).
+  // Comparaison normalisée (casse/accents/espaces) pour tolérer les variantes du Sheet.
+  const statutCounts = useMemo(() => {
+    const col = cols?.statut
+    const rows = data?.rows ?? []
+    const norm = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim()
+    const tally = new Map<string, number>()
+    // Valeurs brutes du Sheet regroupées par forme normalisée → sert de valeurs de
+    // filtre exactes (le filtre colonne compare la cellule brute trimmée).
+    const rawByNorm = new Map<string, Set<string>>()
+    if (col) {
+      for (const r of rows) {
+        const raw = (r[col] ?? "").trim()
+        if (!raw) continue
+        const key = norm(raw)
+        tally.set(key, (tally.get(key) ?? 0) + 1)
+        if (!rawByNorm.has(key)) rawByNorm.set(key, new Set())
+        rawByNorm.get(key)!.add(raw)
+      }
+    }
+    return STATUT_VALUES.map((value) => {
+      const key = norm(value)
+      return {
+        value,
+        count: tally.get(key) ?? 0,
+        cls: statutBadgeClasses(value),
+        matchValues: Array.from(rawByNorm.get(key) ?? []),
+      }
+    })
+  }, [data, cols])
+
+  // Échéances (deadlines) sur les statuts où l'urgence a du sens (Nouveau, En
+  // préparation) : compteur « cette semaine » (aujourd'hui → dimanche) + liste
+  // des demandes prioritaires (deadline dans les 30 jours). Calculé sur TOUTES
+  // les lignes, indépendamment de la recherche/des filtres.
+  const deadlineInfo = useMemo<DeadlineInfo>(() => {
+    const dcol = cols?.dateLimite
+    const scol = cols?.statut
+    const icol = cols?.intitule
+    const rows = data?.rows ?? []
+    if (!dcol) return { thisWeek: 0, priority: [] }
+    const norm = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim()
+    const urgencySet = new Set(STATUTS_AVEC_URGENCE.map(norm))
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const daysUntilSunday = (7 - today.getDay()) % 7 // 0 si on est déjà dimanche
+    let thisWeek = 0
+    const priority: PriorityDeadline[] = []
+    for (const r of rows) {
+      if (scol && !urgencySet.has(norm(r[scol] ?? ""))) continue
+      const days = daysUntil(r[dcol])
+      if (days === null || days < 0) continue // échéance absente ou déjà passée
+      if (days <= daysUntilSunday) thisWeek++
+      if (days <= 30) {
+        priority.push({
+          intitule: icol ? r[icol] ?? "" : "",
+          dateLimite: r[dcol] ?? "",
+          statut: scol ? r[scol] ?? "" : "",
+          days,
+        })
+      }
+    }
+    priority.sort((a, b) => a.days - b.days)
+    return { thisWeek, priority }
+  }, [data, cols])
+
+  // Subventions acceptées (en attente de paiement OU payées) dont le Bilan
+  // n'est PAS coché → bilan administratif à réaliser. Sur toutes les lignes.
+  const bilanInfo = useMemo<BilanInfo>(() => {
+    const scol = cols?.statut
+    const bcol = cols?.bilan
+    const icol = cols?.intitule
+    const mcol = cols?.montantMax
+    const rows = data?.rows ?? []
+    if (!scol) return { count: 0, items: [] }
+    const norm = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim()
+    const targets = new Set(["Accepté en attente de paiement", "Accepté et payé"].map(norm))
+    const items: BilanSubvention[] = []
+    for (const r of rows) {
+      if (!targets.has(norm(r[scol] ?? ""))) continue
+      if (bcol && isBilanChecked(r[bcol])) continue // bilan déjà fait → ignoré
+      items.push({
+        intitule: icol ? r[icol] ?? "" : "",
+        statut: r[scol] ?? "",
+        montant: mcol ? r[mcol] ?? "" : "",
+      })
+    }
+    return { count: items.length, items }
+  }, [data, cols])
 
   const handleColumnFilterChange = useCallback((key: string, values: string[]) => {
     setColumnFilters((prev) => ({ ...prev, [key]: values }))
+  }, [])
+
+  // Filtre rapide depuis l'encadré : sélectionne UNIQUEMENT ce statut, ou le
+  // désélectionne si c'est déjà exactement la sélection courante (toggle).
+  const handleStatutQuickFilter = useCallback((matchValues: string[]) => {
+    if (matchValues.length === 0) return
+    setActiveLevel(null) // exclusif avec un filtre « niveau »
+    setColumnFilters((prev) => {
+      const current = prev.statut ?? []
+      const sameSet = current.length === matchValues.length && matchValues.every((v) => current.includes(v))
+      return { ...prev, statut: sameSet ? [] : matchValues }
+    })
+  }, [])
+
+  // Filtre « niveau » : bascule le niveau cliqué (toggle) et repart d'une base
+  // propre (les filtres de colonnes sont vidés → seul le niveau s'applique).
+  const handleLevelSelect = useCallback((level: 1 | 2 | 3) => {
+    setActiveLevel((prev) => (prev === level ? null : level))
+    setColumnFilters({})
   }, [])
 
   const handleSort = useCallback((key: SortKey, dir: SortDir | null) => {
@@ -222,7 +367,7 @@ export default function VeilleSubventionsPage() {
   }, [filtered, sort, cols])
 
   // Retour à la page 1 dès que le jeu de résultats ou son ordre change.
-  useEffect(() => { setPage(1) }, [search, columnFilters, sort])
+  useEffect(() => { setPage(1) }, [search, columnFilters, sort, activeLevel])
 
   // Pagination : `pageSize` par page, appliquée après recherche + filtres + tri.
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize))
@@ -339,7 +484,7 @@ export default function VeilleSubventionsPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="p-8 max-w-7xl mx-auto">
-      <PageHeader view={view} setView={setView} loading={loading} onRefresh={fetchData} />
+      <PageHeader />
 
       {error && <ErrorBanner title={error.error} hint={error.hint} />}
       {mutationError && (
@@ -348,6 +493,13 @@ export default function VeilleSubventionsPage() {
           hint={mutationError.hint}
           onDismiss={() => setMutationError(null)}
         />
+      )}
+
+      {/* Vue Sheets / chargement : les 3 blocs ne s'appliquent pas → contrôles seuls. */}
+      {!(view === "tableau" && data && cols) && (
+        <div className="mb-4 flex justify-end">
+          <ViewControls view={view} setView={setView} loading={loading} onRefresh={fetchData} />
+        </div>
       )}
 
       {loading && !data && (
@@ -370,10 +522,19 @@ export default function VeilleSubventionsPage() {
       {view === "tableau" && data && cols && (
         <>
           <FilterBar
+            statutCounts={statutCounts}
+            statutFilter={columnFilters.statut ?? []}
+            onStatutSelect={handleStatutQuickFilter}
+            deadline={deadlineInfo}
+            bilan={bilanInfo}
+            activeLevel={activeLevel}
+            onLevelSelect={handleLevelSelect}
             search={search}
             onSearchChange={setSearch}
-            hasActiveFilters={anyFilterActive}
-            onReset={() => setColumnFilters({})}
+            view={view}
+            setView={setView}
+            loading={loading}
+            onRefresh={fetchData}
             count={filtered.length}
             total={data.rows.length}
             page={safePage}
@@ -426,63 +587,67 @@ export default function VeilleSubventionsPage() {
 
 // ─── Sous-composants de mise en page ─────────────────────────────────────────
 
-interface PageHeaderProps {
+function PageHeader() {
+  return (
+    <header className="mb-6">
+      <div className="flex items-center gap-2.5">
+        <span className="p-2 rounded-lg bg-subventions-light">
+          <Search size={18} className="text-subventions-dark" />
+        </span>
+        <h1 className="text-2xl font-bold text-foreground">Veille subventions</h1>
+      </div>
+      <p className="text-sm text-muted mt-1">
+        Subventions détectées automatiquement par l'agent de veille (mis à jour quotidiennement).
+      </p>
+    </header>
+  )
+}
+
+interface ViewControlsProps {
   view: View
   setView: (v: View) => void
   loading: boolean
   onRefresh: () => void
 }
 
-function PageHeader({ view, setView, loading, onRefresh }: PageHeaderProps) {
+// Onglets d'affichage (Tableau / Sheets) + Actualiser + Ouvrir dans Google Sheets.
+// Réutilisé dans le bloc 3 (vue Tableau) et en rangée simple (vue Sheets / chargement).
+function ViewControls({ view, setView, loading, onRefresh }: ViewControlsProps) {
   const tabClass = (active: boolean) =>
     `flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
       active ? "bg-subventions-light text-subventions-dark" : "text-muted hover:text-foreground"
     }`
-
   return (
-    <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <span className="p-2 rounded-lg bg-subventions-light">
-            <Search size={18} className="text-subventions-dark" />
-          </span>
-          <h1 className="text-2xl font-bold text-foreground">Veille subventions</h1>
-        </div>
-        <p className="text-sm text-muted mt-1">
-          Subventions détectées automatiquement par l'agent de veille (mis à jour quotidiennement).
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <div role="tablist" aria-label="Mode d'affichage" className="inline-flex rounded-lg border border-border bg-surface p-0.5">
-          <button role="tab" aria-selected={view === "tableau"} onClick={() => setView("tableau")} className={tabClass(view === "tableau")}>
-            <List size={14} /> Tableau
-          </button>
-          <button role="tab" aria-selected={view === "sheet"} onClick={() => setView("sheet")} className={tabClass(view === "sheet")}>
-            <Calendar size={14} /> Vue Sheets
-          </button>
-        </div>
-
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          title="Recharger les données"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-surface text-muted hover:text-foreground disabled:opacity-50"
-        >
-          <RotateCcw size={14} className={loading ? "animate-spin" : ""} />
-          Actualiser
+    <div className="flex flex-wrap items-center gap-2">
+      <div role="tablist" aria-label="Mode d'affichage" className="inline-flex rounded-lg border border-border bg-surface p-0.5">
+        <button role="tab" aria-selected={view === "tableau"} onClick={() => setView("tableau")} className={tabClass(view === "tableau")}>
+          <List size={14} /> Tableau
         </button>
-
-        <a
-          href={OPEN_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-subventions text-white hover:bg-subventions-dark transition-colors"
-        >
-          <ExternalLink size={14} /> Ouvrir dans Google Sheets
-        </a>
+        <button role="tab" aria-selected={view === "sheet"} onClick={() => setView("sheet")} className={tabClass(view === "sheet")}>
+          <Calendar size={14} /> Vue Sheets
+        </button>
       </div>
-    </header>
+
+      <button
+        onClick={onRefresh}
+        disabled={loading}
+        title="Recharger les données"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-surface text-muted hover:text-foreground disabled:opacity-50"
+      >
+        <RotateCcw size={14} className={loading ? "animate-spin" : ""} />
+        Actualiser
+      </button>
+
+      <a
+        href={OPEN_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-subventions text-white hover:bg-subventions-dark transition-colors"
+        title="Ouvrir dans Google Sheets"
+      >
+        <ExternalLink size={14} /> Ouvrir
+      </a>
+    </div>
   )
 }
 
@@ -511,11 +676,190 @@ function ErrorBanner({ title, hint, onDismiss }: ErrorBannerProps) {
   )
 }
 
+// Compteur d'un statut : valeur canonique, effectif, classes de couleur du badge,
+// et les valeurs brutes du Sheet à passer au filtre colonne quand on clique.
+interface StatutCount {
+  value: string
+  count: number
+  cls: string
+  matchValues: string[]
+}
+
+interface StatutSummaryProps {
+  counts: StatutCount[]
+  /** Valeurs brutes actuellement sélectionnées dans le filtre « Statut ». */
+  activeValues: string[]
+  /** Active/désactive le filtre sur les valeurs brutes d'un statut. */
+  onSelect: (matchValues: string[]) => void
+}
+
+// Encadré récapitulatif vertical : une ligne cliquable par statut (ordre
+// workflow), avec sa pastille colorée + effectif et son libellé complet.
+// Cliquer une ligne active le filtre « Statut » du tableau sur ce statut.
+function StatutSummary({ counts, activeValues, onSelect }: StatutSummaryProps) {
+  const isActive = (m: string[]) =>
+    m.length > 0 && activeValues.length === m.length && m.every((v) => activeValues.includes(v))
+
+  return (
+    <div
+      role="group"
+      aria-label="Répartition par statut — cliquer pour filtrer"
+      className="inline-flex flex-col gap-0.5 rounded-lg border border-border bg-surface p-1.5"
+    >
+      {counts.map(({ value, count, cls, matchValues }) => {
+        const active = isActive(matchValues)
+        const disabled = count === 0
+        return (
+          <button
+            key={value}
+            type="button"
+            disabled={disabled}
+            aria-pressed={active}
+            onClick={() => onSelect(matchValues)}
+            title={disabled ? `${value} : 0` : active ? `Retirer le filtre « ${value} »` : `Filtrer sur « ${value} »`}
+            className={`flex items-center gap-2 text-xs text-left rounded-md px-1.5 py-1 transition-colors ${
+              disabled ? "opacity-40 cursor-default" : "cursor-pointer hover:bg-slate-50"
+            } ${active ? "bg-subventions-light ring-1 ring-subventions/30" : ""}`}
+          >
+            <span
+              className={`inline-flex items-center justify-center w-9 py-0.5 rounded-full font-semibold tabular-nums ${cls}`}
+            >
+              {count}
+            </span>
+            <span className={`text-foreground ${active ? "font-semibold" : ""}`}>{value}</span>
+            {/* Croix visible uniquement sur le statut sélectionné → clic = retire le filtre */}
+            {active && <X size={13} className="ml-auto shrink-0 text-subventions-dark" aria-hidden="true" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Une échéance de la liste « demandes prioritaires » (deadline ≤ 30 jours).
+interface PriorityDeadline {
+  intitule: string
+  dateLimite: string
+  statut: string
+  days: number
+}
+
+interface DeadlineInfo {
+  /** Nb d'échéances entre aujourd'hui et dimanche de la semaine en cours. */
+  thisWeek: number
+  /** Demandes dont l'échéance tombe dans les 30 prochains jours, triées. */
+  priority: PriorityDeadline[]
+}
+
+// Une ligne (niveau) de l'encadré d'alertes : gros nombre + libellé, centré.
+// Cliquable → filtre le tableau sur les subventions du niveau. Fond en couleur
+// pleine dès qu'il y a ≥ 1 élément, effacé sinon ; anneau si le niveau est actif.
+function AlertLevel({ count, label, activeClass, idleClass, active, onSelect, cornerClass }: {
+  count: number
+  label: string
+  activeClass: string
+  idleClass: string
+  active: boolean
+  onSelect: () => void
+  /** Arrondi des coins extérieurs (1ᵉʳ / dernier niveau) pour que l'anneau épouse le conteneur. */
+  cornerClass?: string
+}) {
+  const disabled = count === 0
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={active}
+      onClick={onSelect}
+      title={disabled ? `${label} : 0` : active ? "Retirer ce filtre" : `Filtrer le tableau : ${label}`}
+      className={`relative flex flex-1 items-center justify-center px-3 py-2 transition ${cornerClass ?? ""} ${count > 0 ? activeClass : idleClass} ${
+        disabled ? "cursor-default" : "cursor-pointer hover:brightness-95"
+      } ${active ? "ring-2 ring-inset ring-current" : ""}`}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="text-2xl font-bold tabular-nums leading-none">{count}</span>
+        <span className="text-center text-xs font-semibold">{label}</span>
+      </div>
+      {/* Croix visible uniquement sur le niveau actif → clic = réinitialise le filtre */}
+      {active && <X size={14} className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0" aria-hidden="true" />}
+    </button>
+  )
+}
+
+// Encadré d'alertes en 3 niveaux : deadlines de la semaine / demandes ≤ 30 jours
+// / bilans à réaliser. Juste le compteur et son libellé par niveau. Même hauteur
+// que l'encadré des statuts (les 3 niveaux se répartissent la hauteur).
+function AlertsSummary({ deadline, bilan, height, activeLevel, onLevelSelect }: {
+  deadline: DeadlineInfo
+  bilan: BilanInfo
+  height?: number
+  activeLevel: number | null
+  onLevelSelect: (level: 1 | 2 | 3) => void
+}) {
+  const week = deadline.thisWeek
+  const soon = deadline.priority.length
+  const bilans = bilan.count
+  return (
+    <div
+      style={height ? { height } : undefined}
+      className="inline-flex w-72 flex-col divide-y divide-border rounded-lg border border-border bg-surface"
+    >
+      <AlertLevel
+        count={week}
+        label={`Deadline${week > 1 ? "s" : ""} cette semaine`}
+        activeClass="bg-subventions text-white"
+        idleClass="bg-subventions-light text-subventions-dark/60"
+        active={activeLevel === 1}
+        onSelect={() => onLevelSelect(1)}
+        cornerClass="rounded-t-lg"
+      />
+      <AlertLevel
+        count={soon}
+        label={`Demande${soon > 1 ? "s" : ""} d'ici 30 jours`}
+        activeClass="bg-brand text-white"
+        idleClass="bg-brand-light text-brand-dark/60"
+        active={activeLevel === 2}
+        onSelect={() => onLevelSelect(2)}
+      />
+      <AlertLevel
+        count={bilans}
+        label={`Bilan${bilans > 1 ? "s" : ""} à réaliser`}
+        activeClass="bg-finances text-white"
+        idleClass="bg-finances-light text-finances-dark/60"
+        active={activeLevel === 3}
+        onSelect={() => onLevelSelect(3)}
+        cornerClass="rounded-b-lg"
+      />
+    </div>
+  )
+}
+
+// Une subvention acceptée dont le bilan reste à faire.
+interface BilanSubvention {
+  intitule: string
+  statut: string
+  montant: string
+}
+
+interface BilanInfo {
+  count: number
+  items: BilanSubvention[]
+}
+
 interface FilterBarProps {
+  statutCounts: StatutCount[]
+  statutFilter: string[]
+  onStatutSelect: (matchValues: string[]) => void
+  deadline: DeadlineInfo
+  bilan: BilanInfo
+  activeLevel: number | null
+  onLevelSelect: (level: 1 | 2 | 3) => void
   search: string
   onSearchChange: (v: string) => void
-  hasActiveFilters: boolean
-  onReset: () => void
+  view: View
+  setView: (v: View) => void
+  loading: boolean
+  onRefresh: () => void
   count: number
   total: number
   page: number
@@ -524,38 +868,73 @@ interface FilterBarProps {
   onPageChange: (page: number) => void
 }
 
-function FilterBar({ search, onSearchChange, hasActiveFilters, onReset, count, total, page, totalPages, pageSize, onPageChange }: FilterBarProps) {
+// Partie haute de la vue Tableau en 3 blocs de même hauteur (référence = bloc 1) :
+//   1. StatutSummary (filtres par statut)   2. AlertsSummary (3 niveaux)
+//   3. Reste regroupé : recherche + affichage/actions + pagination du haut.
+function FilterBar({ statutCounts, statutFilter, onStatutSelect, deadline, bilan, activeLevel, onLevelSelect, search, onSearchChange, view, setView, loading, onRefresh, count, total, page, totalPages, pageSize, onPageChange }: FilterBarProps) {
+  // Le bloc 1 (statuts) est la référence de hauteur : on mesure sa hauteur réelle
+  // et on l'impose aux blocs 2 et 3.
+  const statutRef = useRef<HTMLDivElement>(null)
+  const [statutHeight, setStatutHeight] = useState<number>()
+  useEffect(() => {
+    const el = statutRef.current
+    if (!el) return
+    const update = () => setStatutHeight(el.offsetHeight)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      <div className="relative flex-1 min-w-[200px] max-w-md">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-        <input
-          type="search"
-          placeholder="Rechercher…"
-          aria-label="Rechercher une subvention"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:border-subventions"
-        />
+    <div className="mb-4 flex flex-wrap items-start gap-2">
+      {/* Bloc 1 — filtres par statut (référence de hauteur) */}
+      <div ref={statutRef}>
+        <StatutSummary counts={statutCounts} activeValues={statutFilter} onSelect={onStatutSelect} />
       </div>
-      {hasActiveFilters && (
-        <button
-          onClick={onReset}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border bg-surface text-muted hover:text-foreground"
-        >
-          <X size={14} /> Réinitialiser les filtres
-        </button>
-      )}
-      {/* À droite : pager compact si plusieurs pages, sinon le compteur filtré */}
-      {totalPages > 1 ? (
-        <div className="ml-auto">
-          <Pagination compact page={page} totalPages={totalPages} total={count} pageSize={pageSize} onPageChange={onPageChange} />
+
+      {/* Bloc 2 — les 3 niveaux d'alertes */}
+      <AlertsSummary
+        deadline={deadline}
+        bilan={bilan}
+        height={statutHeight}
+        activeLevel={activeLevel}
+        onLevelSelect={onLevelSelect}
+      />
+
+      {/* Bloc 3 — recherche + affichage/actions + pagination, répartis
+          homogènement sur la hauteur du bloc 1 (pas de cadre : contrôles indépendants). */}
+      <div
+        style={statutHeight ? { height: statutHeight } : undefined}
+        className="flex min-w-[280px] flex-1 flex-col justify-between gap-2"
+      >
+        {/* Haut : recherche puis les 3 boutons juste en dessous */}
+        <div className="flex flex-col gap-2">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              type="search"
+              placeholder="Rechercher…"
+              aria-label="Rechercher une subvention"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface py-2 pl-9 pr-3 text-sm focus:border-subventions focus:outline-none"
+            />
+          </div>
+          <ViewControls view={view} setView={setView} loading={loading} onRefresh={onRefresh} />
         </div>
-      ) : (
-        <span className="text-xs text-muted ml-auto">
-          {count} / {total} subvention{total > 1 ? "s" : ""}
-        </span>
-      )}
+
+        {/* Bas : pagination à droite */}
+        <div className="flex justify-end">
+          {totalPages > 1 ? (
+            <Pagination compact page={page} totalPages={totalPages} total={count} pageSize={pageSize} onPageChange={onPageChange} />
+          ) : (
+            <span className="text-xs text-muted">
+              {count} / {total} subvention{total > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
