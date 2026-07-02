@@ -4,8 +4,8 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
-  Heart, LogOut, UserCircle,
-  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, GraduationCap, StickyNote,
+  Heart, LogOut, UserCircle, Search,
+  UserCheck, BarChart2, ClipboardCheck, BookOpen, Megaphone, UserCog, GraduationCap, StickyNote,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { moduleForPath } from "@/lib/modules"
@@ -17,24 +17,23 @@ import { moduleForPath } from "@/lib/modules"
 type ModuleCard = {
   href: string
   label: string
-  sub: string
   icon: typeof Heart
   accent: string
   iconClass: string
   superAdminOnly?: boolean
 }
 
+// Ordre + intitulés repris à l'identique de la section « Opérationnel » de la sidebar.
 const modules: ModuleCard[] = [
-  { href: "/familles",      label: "Familles",      sub: "Bénéficiaires, paiements, docs", icon: UserCheck,      accent: "bg-familles-light",      iconClass: "text-familles-dark" },
-  { href: "/assiduite",     label: "Assiduité",     sub: "Présences, décrochage",          icon: BarChart2,      accent: "bg-absences-light",     iconClass: "text-absences-dark" },
-  { href: "/emargement",    label: "Émargement",    sub: "Présences par séance",           icon: ClipboardCheck, accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
-  { href: "/finances",      label: "Finances",      sub: "Financements, inscriptions",     icon: Euro,           accent: "bg-finances-light",     iconClass: "text-finances-dark" },
-  { href: "/ateliers",      label: "Ateliers",      sub: "Planning, groupes",              icon: BookOpen,       accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
-  { href: "/positionnement", label: "Positionnement", sub: "Génération de tests",          icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
-  { href: "/notes",         label: "Notes",         sub: "Saisie des évaluations",         icon: StickyNote,     accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
-  { href: "/communication", label: "Communication", sub: "Calendrier, kanban, IA",         icon: Megaphone,      accent: "bg-communication-light", iconClass: "text-communication-dark" },
-  { href: "/membres",       label: "Équipe",        sub: "Annuaire de l'équipe",           icon: UserCog,        accent: "bg-slate-100",          iconClass: "text-slate-700" },
-  { href: "/compte",        label: "Mon compte",    sub: "Profil, comptes",                icon: UserCircle,     accent: "bg-slate-100",          iconClass: "text-slate-700" },
+  { href: "/emargement",         label: "Émargement",             icon: ClipboardCheck, accent: "bg-ateliers-light",       iconClass: "text-ateliers-dark" },
+  { href: "/assiduite",          label: "Assiduité",              icon: BarChart2,      accent: "bg-absences-light",       iconClass: "text-absences-dark" },
+  { href: "/veille-subventions", label: "Veille subventions",     icon: Search,         accent: "bg-subventions-light",    iconClass: "text-subventions-dark" },
+  { href: "/ateliers",           label: "Ateliers",               icon: BookOpen,       accent: "bg-ateliers-light",       iconClass: "text-ateliers-dark" },
+  { href: "/familles",           label: "Familles",               icon: UserCheck,      accent: "bg-familles-light",       iconClass: "text-familles-dark" },
+  { href: "/positionnement",     label: "Test de positionnement", icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
+  { href: "/notes",              label: "Notes",                  icon: StickyNote,     accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
+  { href: "/communication",      label: "Communication",          icon: Megaphone,      accent: "bg-communication-light",  iconClass: "text-communication-dark" },
+  { href: "/membres",            label: "Équipe",                 icon: UserCog,        accent: "bg-slate-100",            iconClass: "text-slate-700" },
 ]
 
 function todayFr() {
@@ -52,10 +51,10 @@ export default function DashboardPage() {
 
   if (!user) return null
 
-  // N'affiche que les cartes autorisées : Mon compte toujours, l'Équipe si
-  // administratrice, les modules selon les permissions de la personne.
+  // N'affiche que les cartes autorisées : l'Équipe si administratrice, les
+  // modules selon les permissions de la personne (les pages hors périmètre
+  // « modules », ex. Veille subventions, restent visibles pour tous).
   const cards = modules.filter((m) => {
-    if (m.href === "/compte") return true
     if (m.href === "/membres") return user.isAdmin === true
     const key = moduleForPath(m.href)
     return key ? (user.modules ?? []).includes(key) : true
@@ -98,8 +97,9 @@ export default function DashboardPage() {
       </header>
 
       {/* Grille de modules */}
-      <nav aria-label="Modules" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {cards.map(({ href, label, sub, icon: Icon, accent, iconClass }) => (
+      <h2 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Opérationnel</h2>
+      <nav aria-label="Opérationnel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {cards.map(({ href, label, icon: Icon, accent, iconClass }) => (
           <Link
             key={href}
             href={href}
@@ -108,12 +108,16 @@ export default function DashboardPage() {
             <span className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${accent} ${iconClass}`}>
               <Icon size={22} />
             </span>
-            <span className="min-w-0">
-              <span className="block font-semibold text-foreground">{label}</span>
-              <span className="block text-sm text-muted truncate">{sub}</span>
-            </span>
+            <span className="min-w-0 font-semibold text-foreground">{label}</span>
           </Link>
         ))}
+      </nav>
+
+      {/* Liens légaux — le tableau de bord n'a pas de sidebar (voir AuthGate), donc pas d'autre accès */}
+      <nav aria-label="Pages légales" className="mt-10 flex flex-wrap gap-x-4 gap-y-1">
+        <Link href="/mentions-legales" className="text-xs text-muted hover:text-foreground transition-colors">Mentions légales</Link>
+        <Link href="/confidentialite" className="text-xs text-muted hover:text-foreground transition-colors">Confidentialité</Link>
+        <Link href="/accessibilite" className="text-xs text-muted hover:text-foreground transition-colors">Accessibilité</Link>
       </nav>
     </div>
   )

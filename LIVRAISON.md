@@ -2,7 +2,7 @@
 
 > **À mettre à jour** à chaque nouvelle fonctionnalité, intégration ou changement de configuration avant livraison à l'association.
 >
-> Dernière mise à jour : 2026-07-01
+> Dernière mise à jour : 2026-07-02
 
 ---
 
@@ -36,14 +36,14 @@ Il centralise :
 | Élément | Détail |
 |---|---|
 | Framework | Next.js 16 (App Router) |
-| UI | Tailwind CSS v4, lucide-react |
+| UI | Tailwind CSS v4, lucide-react, charte graphique **« Estuaire »** (palette teal/vert forêt/doré, Poppins + Inter — voir `docs/reference/charte-graphique-estuaire.md`) |
 | Authentification | **Supabase Auth** (comptes réels, sessions serveur) |
 | Persistance données | **Hybride** : Google Sheets (Familles, Assiduité, Communication) + `localStorage` (autres modules) |
 | Documents / Médias | Google Drive (pièces jointes des fiches membres + images/vidéos des posts) |
 | IA | Google Gemini (génération de posts + OCR bulletins) |
 | Hébergement | Vercel (déploiement automatique) |
 | Dépôt | github.com/anais0210/asso-pilotage |
-| URL production | asso-inky.vercel.app |
+| URL production | asso-pilotage.vercel.app |
 
 > **Important — où vivent les données :**
 > - **Authentification** : Supabase (comptes partagés, vérifiés côté serveur).
@@ -62,7 +62,7 @@ Il centralise :
 ### Familles / Bénéficiaires (`/familles`) — **Google Sheets**
 - Listing avec onglets (Familles / Membres), recherche par préfixe tolérante aux accents, tri alphabétique
 - **Fiche famille** : infos (adresse, quartier QVP, composition, contact principal cliquable), **autocomplétion d'adresse** (Base Adresse Nationale), cartes membres, journal de suivi
-- **Fiche membre** : état civil, **âge calculé automatiquement**, inscriptions (niveau/statut), **paiements** + reste à payer, **documents** (upload Google Drive), journal de suivi (commentaires / appels / emails)
+- **Fiche membre** : état civil, **âge calculé automatiquement**, inscriptions (niveau/statut), **paiements** + reste à payer, **documents** (upload Google Drive — Fiche d'inscription, Droit à l'image, Charte d'engagement, Autorisation de sortie, Bulletins ; statut Oui/Non **dérivé automatiquement** de la présence du fichier, plus de saisie manuelle), journal de suivi (commentaires / appels / emails)
 - **Sélecteur de date natif** pour les dates (naissance, inscription, paiement)
 - **OCR de bulletins d'inscription (PDF)** : à l'ajout d'un membre, l'upload d'un bulletin PDF **pré-remplit automatiquement** nom, prénom, date de naissance, téléphones, montant (via Google Gemini)
 
@@ -109,6 +109,9 @@ Il centralise :
 - Modification de son profil (prénom, nom, email) et de son mot de passe
 - **Admin uniquement** : création, modification et suppression de comptes membres
 
+### Pages légales (`/mentions-legales`, `/confidentialite`, `/accessibilite`)
+- Accessibles **sans connexion** (exceptions publiques, voir `AuthGate.tsx`) et depuis l'app connectée (pied de sidebar + pied du tableau de bord)
+
 ---
 
 ## 3. Accès et comptes
@@ -151,7 +154,7 @@ Il centralise :
 
 ### URL de production
 ```
-https://asso-inky.vercel.app
+https://asso-pilotage.vercel.app
 ```
 
 ### Déploiement automatique
@@ -200,7 +203,7 @@ git push origin main
 - Renseigner `GOOGLE_CLIENT_EMAIL` + `GOOGLE_PRIVATE_KEY` (Vercel + `.env.local`).
 
 ### Étape 3 — Première connexion
-1. Ouvrir `https://asso-inky.vercel.app`
+1. Ouvrir `https://asso-pilotage.vercel.app`
 2. Se connecter avec `admin@asso.fr` + le mot de passe choisi à l'étape 1
 3. `/compte` → **Changer le mot de passe**
 
@@ -272,6 +275,8 @@ signature) pour pré-remplir le formulaire d'ajout de membre.
 - [x] Authentification serveur partagée (Supabase) ✅
 - [x] Familles & Assiduité connectés à Google Sheets ✅
 - [x] OCR des bulletins d'inscription (Gemini) ✅
+- [x] Charte graphique unifiée « Estuaire » (palette, typographie, arrondis) ✅
+- [x] Statut des documents fiche membre dérivé automatiquement des pièces jointes ✅
 
 ---
 
@@ -281,7 +286,7 @@ signature) pour pré-remplir le formulaire d'ajout de membre.
 |---|---|
 | Développement | anais.camille.sparesotto@gmail.com |
 | Dépôt GitHub | github.com/anais0210/asso-pilotage |
-| Hébergement | asso-inky.vercel.app (Vercel) |
+| Hébergement | asso-pilotage.vercel.app (Vercel) |
 
 ### En cas de problème
 
