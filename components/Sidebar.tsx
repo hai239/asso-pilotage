@@ -13,6 +13,7 @@ import {
   UserCog,
   BarChart2,
   UserCheck,
+  List,
   GraduationCap,
   Search,
   StickyNote,
@@ -30,6 +31,7 @@ const navItems = [
   { href: "/positionnement", label: "Test de positionnement", icon: GraduationCap, accent: "bg-positionnement-light text-positionnement-dark", dot: "bg-positionnement" },
   { href: "/notes",         label: "Notes",            icon: StickyNote,      accent: "bg-positionnement-light text-positionnement-dark", dot: "bg-positionnement" },
   { href: "/communication", label: "Communication",   icon: Megaphone,       accent: "bg-communication-light text-communication-dark", dot: "bg-communication" },
+  { href: "/rapports",      label: "Rapports",         icon: List,            accent: "bg-rapports-light text-rapports-dark",           dot: "bg-rapports" },
   { href: "/membres",       label: "Équipe",          icon: UserCog,         accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
 ]
 

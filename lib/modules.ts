@@ -12,7 +12,7 @@
 
 export type ModuleKey =
   | "emargement" | "assiduite" | "ateliers"
-  | "familles" | "positionnement" | "notes" | "communication"
+  | "familles" | "positionnement" | "notes" | "communication" | "rapports"
 
 export interface ModuleDef {
   key: ModuleKey
@@ -28,6 +28,7 @@ export const MODULES: ModuleDef[] = [
   { key: "positionnement", label: "Test de positionnement", href: "/positionnement" },
   { key: "notes",          label: "Notes",                  href: "/notes" },
   { key: "communication",  label: "Communication",          href: "/communication" },
+  { key: "rapports",       label: "Rapports",               href: "/rapports" },
 ]
 
 export const ALL_MODULE_KEYS: ModuleKey[] = MODULES.map((m) => m.key)

@@ -18,7 +18,7 @@ Persistance : `localStorage` pour la plupart des modules. **Exception : le modul
 | React | 19 | Server Components + `"use client"` explicite |
 | TypeScript | 5 | `strict: true` |
 | lucide-react | 1.16.0 | Certaines icônes n'existent pas — voir liste dans `AGENTS.md` |
-| Gemini API | `fetch` natif (pas de SDK npm) | Génération IA posts Communication + OCR — clé `GEMINI_API_KEY` dans `.env.local` |
+| Gemini API | `fetch` natif (pas de SDK npm) | Génération IA : posts Communication, OCR bulletins, tests de positionnement, et **module Rapports** (contenu + template/style/gabarits) — clé `GEMINI_API_KEY` dans `.env.local` |
 
 ## Structure des modules
 
@@ -37,6 +37,9 @@ app/
 ├── positionnement/ Génération de tests de positionnement — Gemini (texte + TTS)
 ├── notes/          Saisie rapide des notes d'évaluation — Google Sheets
 ├── communication/  Calendrier éditorial + kanban suivi posts — Google Sheets
+├── rapports/       Génération de rapports d'activité — backend Slides/Drive réel + Gemini
+│   ├── page.tsx              Dashboard 3 sections renommables (création/brouillons/historique)
+│   └── edition/[id]/page.tsx Écran plein écran, split-pane éditeur + panneau IA
 ├── membres/        Annuaire équipe (admins uniquement)
 ├── compte/         Profil + mot de passe (+ gestion des comptes pour admins)
 └── (pages légales) mentions-legales/ · confidentialite/ · accessibilite/  (publiques)
@@ -56,12 +59,21 @@ lib/
 ├── mock-data.ts        Données mockées (absences, ateliers, communication, membres, bénévoles)
 ├── emargement-data.ts  Séances + présences initiales
 ├── sheets-api.ts       Couche client module Familles (fetch → /api/sheets)
-└── google-sheets-server.ts  Clients Sheets + Drive (compte de service, côté serveur)
+├── google-sheets-server.ts  Clients Sheets + Drive (compte de service, côté serveur)
+├── google-slides-server.ts  Client Slides + génération/sync du deck (compte de service)
+├── rapports-data.ts    Types + mocks module Rapports (localStorage) + contrats partagés
+├── rapports-slides-api.ts  Couche client Rapports → Slides (fetch → /api/slides, best-effort)
+├── rapports-template-api.ts  Couche client template/style/suggestions IA (fetch → /api/rapports-template, lève une erreur)
+├── rapports-generation-api.ts  Couche client génération IA du contenu complet (fetch → /api/rapports-generation, lève une erreur)
+└── use-fermer-au-clic-exterieur.ts  Hook partagé : ferme un menu au clic hors de son conteneur
 
 app/api/
 ├── generate-post/route.ts  POST — génère contenu + hashtags via Gemini (fetch natif)
 │                            Requiert GEMINI_API_KEY dans .env.local
-└── sheets/route.ts     API REST Google Sheets v4 du module Familles (voir "Backend Familles")
+├── sheets/route.ts     API REST Google Sheets v4 du module Familles (voir "Backend Familles")
+├── slides/route.ts     API Google Slides du module Rapports (voir "Module Rapports")
+├── rapports-template/route.ts  Analyse de template, suggestions visuelles/style, bibliothèque Drive
+└── rapports-generation/route.ts  Génération IA du contenu complet du rapport (10 thèmes AREA)
 ```
 
 ## Conventions impératives
@@ -214,7 +226,7 @@ IDs réservés : 9001–9099. Supprimer ce fichier + le dossier `app/dev/` avant
 - ❌ Ne pas créer `tailwind.config.ts` — config dans `globals.css`
 - ❌ Ne pas importer `Linkedin`, `Instagram`, `Facebook`, `Kanban` de lucide-react (n'existent pas en v1.16.0)
 - ❌ Ne pas utiliser `bg-[var(--color-xxx)]` — utiliser `bg-xxx`
-- ❌ Ne pas créer de routes API (`app/api/`) sans décision d'équipe — exceptions validées : `app/api/generate-post/route.ts` (génération IA), `app/api/sheets/route.ts` (backend Google Sheets du module Familles), `app/api/ocr/route.ts` (OCR bulletins d'inscription via Gemini API), `app/api/subventions-sheet/*` (backend Google Sheets de la Veille subventions : lecture CSV + écriture via Web App Apps Script — nécessite `SHEETS_WEBAPP_URL` + `SHEETS_WEBAPP_TOKEN`)
+- ❌ Ne pas créer de routes API (`app/api/`) sans décision d'équipe — exceptions validées : `app/api/generate-post/route.ts` (génération IA), `app/api/sheets/route.ts` (backend Google Sheets du module Familles), `app/api/ocr/route.ts` (OCR bulletins d'inscription via Gemini API), `app/api/subventions-sheet/*` (backend Google Sheets de la Veille subventions : lecture CSV + écriture via Web App Apps Script — nécessite `SHEETS_WEBAPP_URL` + `SHEETS_WEBAPP_TOKEN`), `app/api/slides/route.ts` (backend Google Slides du module Rapports), `app/api/rapports-template/route.ts` (template/style/suggestions IA du module Rapports) et `app/api/rapports-generation/route.ts` (génération IA du contenu complet du module Rapports)
 - ❌ Ne pas mettre de données dans l'URL (PII)
 - ❌ Ne pas casser le pattern SlideOver existant (cohérence UX)
 
@@ -575,7 +587,9 @@ GEMINI_API_KEY=...                                    # OCR bulletins d'inscript
 - `getStatut(statut)` — normalise vers `EN COURS` / `ARRÊTÉ` / `SUSPENDU`
 
 > Le reste de l'app (dashboard, absences, ateliers, bénévoles, membres…)
-> reste en **localStorage** — Familles et Communication sont passés sur Google Sheets/Drive.
+> reste en **localStorage** — Familles et Communication sont passés sur Google Sheets/Drive,
+> Rapports est **hybride** (localStorage + vrai Google Slides/Drive à certains checkpoints,
+> voir plus bas).
 
 ---
 
@@ -605,3 +619,271 @@ Colonnes ajoutées via `ensureColumns` (créées automatiquement au premier `add
 | `lib/google-sheets-server.ts` | `ensureColumns` (ajout de plusieurs colonnes en 1 lecture), `COMMUNICATION_MEDIA_FOLDER_ID` |
 
 > `asso-communication-rejected` reste en `localStorage` (annotation UI, pas une donnée métier — voir section Communication).
+
+---
+
+## Module Rapports — diapositives dynamiques + sync Google Slides par checkpoints
+
+Génération de rapports d'activité (contexte : coéducation AREA, indicateurs annuels,
+export en présentation). Le module reste en **localStorage** pour les listes et l'édition
+(comme tous les modules sauf Familles), mais synchronise désormais un **vrai Google Slides**
+à des moments précis — **pas de sync en temps réel caractère par caractère** (quotas API,
+pas de push serveur→navigateur simple sur Vercel serverless) :
+
+### Diapositives dynamiques (pas de nombre fixe)
+Le deck n'a **plus de nombre de diapositives figé** (une quarantaine pour un vrai rapport,
+sans plafond). L'utilisateur découpe lui-même le texte du panneau gauche en tapant **une ligne
+de plus de 10 tirets** (`DELIMITEUR_RE = /^-{11,}$/`, `lib/rapports-data.ts`) sur sa propre
+ligne : chaque segment entre deux délimiteurs (ou début/fin) devient une diapositive,
+**instantanément** (réutilise la synchronisation passive ci-dessous). Supprimer la ligne de
+tirets refusionne les deux diapositives voisines — aucune logique d'annulation séparée, c'est
+recalculé à chaque frappe depuis le texte brut. **Ces lignes n'apparaissent jamais** dans
+l'aperçu de droite ni dans le vrai Google Slides.
+
+### ⚠️ Charte réelle AREA (corrige les premiers mockups)
+Les tout premiers mockups de ce module utilisaient un bleu marine/turquoise **inventé** (donné
+dans la spec initiale). L'utilisateur a ensuite fourni 2 vrais rapports d'activité AREA en PDF —
+`STYLE_DEFAUT` (`lib/rapports-data.ts`) et `--color-rapports*` (`app/globals.css`) ont été
+recalibrés sur les **vraies couleurs** (extraites du logo au pixel près) :
+- Vert sapin foncé `#0B4F4B` (titres/couleur principale — remplace l'ancien `#005088`)
+- Turquoise `#1C9AA0` (accent — remplace l'ancien `#11caa0`)
+
+Le vrai logo AREA (triangles superposés) a été extrait de ces PDF (`pdftoppm`/`pdfimages` du
+paquet `poppler`, recombiné avec sa soft mask via Pillow pour la transparence) et vit dans
+`public/area-logo.png`. Il est affiché en badge sur chaque diapositive dans `SlidePreview.tsx`.
+- `decouperDiapositives(texte)` — segments uniquement (délimiteurs exclus), utilisé par
+  `SlidePreview.tsx` et tout le backend Slides.
+- `tagLignesParSegment(texte)` — découpe ligne par ligne en taguant l'index de segment de
+  chaque ligne (délimiteurs inclus, tagués `delimiteur: true`), utilisé par le panneau gauche
+  pour le rendu **ligne par ligne** (une ligne = un élément DOM du `contentEditable`, calé sur
+  le comportement natif du navigateur à chaque Entrée) et le surlignage croisé.
+- Toutes les diapositives sont **génériques** (même gabarit charte AREA — bleu marine/turquoise,
+  Poppins/Lato). Les anciens designs spéciaux par position fixe (cartes KPI, tableau de
+  progression, triangle, témoignage) ont été retirés : plus de rôle fixe possible par diapositive
+  quand leur nombre/ordre est entièrement piloté par l'utilisateur.
+
+- **Interface → Slide** : au clic sur "💾 Sauvegarder le brouillon" et sur "✅ Valider le
+  rapport" (jamais pendant la frappe).
+- **Slide → Interface** : à la réouverture d'un brouillon ("Reprendre l'édition") — si le
+  Slides a été modifié directement sur Drive, cette version remplace la copie locale
+  (ré-injection). Pas de polling pendant que l'éditeur est ouvert.
+- Toutes les synchronisations sont **best-effort** : si les dossiers Drive ne sont pas
+  configurés (variables d'env absentes) ou en cas d'erreur réseau, l'échec est absorbé
+  silencieusement (`console.warn`) et le module continue de fonctionner en localStorage pur.
+
+### Architecture
+```
+Client (app/rapports/*)
+  → lib/rapports-slides-api.ts   (fetch best-effort vers /api/slides)
+  → app/api/slides/route.ts      (routeur par "action")
+  → lib/google-slides-server.ts  (client Slides — création/sync/lecture du deck)
+  → lib/google-sheets-server.ts  (client Drive réutilisé — déplacement de fichier, export PDF)
+  → Google Slides + Google Drive (dossiers Rapports)
+```
+
+### Backend Slides — reconstruction complète à chaque checkpoint
+Le découpage n'étant plus fixe (segments insérables/supprimables n'importe où, y compris au
+milieu), un patch chirurgical par `objectId` fixe n'est plus fiable. `reconstruireSlides`
+(`lib/google-slides-server.ts`) supprime toutes les pages existantes puis recrée une page +
+zone de texte par segment courant, dans l'ordre — un seul `batchUpdate`, gère nativement
+l'ajout/suppression/réordonnancement de diapositives. Utilisée à la fois pour la création
+initiale (`presentationId` nul) et la synchronisation (`presentationId` fourni).
+`lireTextesRapport` relit simplement le texte de chaque page **dans l'ordre réel du fichier**
+(plus de mapping par index fixe) — s'adapte si l'utilisateur a ajouté/retiré des diapositives
+directement dans Slides.
+
+### Portée actuelle vs. visuelle du mock React
+Le vrai Google Slides généré est **plus simple visuellement** que l'aperçu React (une seule
+zone de texte par page, texte brut). Une mise en forme plus riche du vrai fichier (couleurs,
+tableaux…) reste une itération séparée à faire plus tard. Seul le **format de page** (16:9 vs
+A4, voir plus bas) est répliqué sur le vrai fichier — pas la mise en page des gabarits.
+
+### Bouton "Valider le rapport"
+Distinct de "Sauvegarder" : synchronise une dernière fois, déplace le fichier Drive de
+`RAPPORTS_BROUILLONS_FOLDER_ID` vers `RAPPORTS_ARCHIVES_FOLDER_ID`, retire le brouillon de
+`asso-rapports-brouillons` et ajoute une entrée dans `asso-rapports-historique` (première
+écriture réelle de cette clé — l'Historique n'était que mock statique en Phase 1).
+
+### ⚠️ Configuration requise (à faire par l'utilisateur avant que la sync fonctionne)
+1. Créer 3 dossiers Google Drive (ex. `/AREA/Rapports/Brouillons`, `/AREA/Rapports/Archives`,
+   `/AREA/Rapports/Templates` — ce dernier pour la bibliothèque de templates, voir plus bas).
+2. Les partager avec le compte de service (`GOOGLE_CLIENT_EMAIL`) — **Éditeur** pour
+   Brouillons/Archives (comme les 4 dossiers Documents du module Familles), **Lecteur** suffit
+   pour Templates (lecture seule).
+3. Ajouter dans `.env.local` + Vercel :
+   ```
+   GOOGLE_DRIVE_RAPPORTS_BROUILLONS_FOLDER_ID=...
+   GOOGLE_DRIVE_RAPPORTS_ARCHIVES_FOLDER_ID=...
+   GOOGLE_DRIVE_RAPPORTS_TEMPLATES_FOLDER_ID=...
+   ```
+   Scope Google supplémentaire utilisé : `https://www.googleapis.com/auth/presentations`
+   (API Slides — doit être activée sur le même projet Google Cloud que Sheets/Drive).
+
+### Synchronisation passive texte ↔ aperçu (temps réel, côté interface uniquement)
+Chaque frappe dans le panneau gauche (`onInput`) relit le DOM et met à jour l'état
+`contenuActif`, qui alimente `SlidePreview` : l'aperçu des diapositives reflète le texte
+instantanément. C'est un simple miroir de texte, **pas** une révision — aucun appel IA, aucun
+changement de mise en page. Ne touche jamais le vrai Google Slides (qui reste synchronisé
+uniquement aux checkpoints Sauvegarder/Valider, voir ci-dessus).
+
+### ⚠️ Révision IA — retirée
+Les boutons "Révision globale"/"Réviser cette diapositive" (réécriture du texte par Claude) ont
+été retirés à la demande de l'utilisateur (jugés peu utiles) — `app/api/rapports-revision/route.ts`
+et `lib/rapports-revision-api.ts` ont été supprimés. Ne pas les recréer sans nouvelle demande
+explicite.
+
+### Génération de contenu suivant la trame réelle AREA — implémentée
+`THEMES_RAPPORT` (`lib/rapports-data.ts`) fixe les 10 thèmes relevés sur les rapports d'activité
+PDF réels fournis par l'utilisateur (Mot de la directrice, parcours élèves/parents, mesure
+d'impact élèves/parents, nos actions élèves/parents, interventions extérieures, vie associative,
+perspectives). Au clic sur "Générer" (`app/rapports/page.tsx`), `genererRapportIA`
+(`lib/rapports-generation-api.ts` → `app/api/rapports-generation/route.ts`) est appelé en
+priorité : il transmet le JSON complet de `RapportKPIs` ("la base de données") et demande à
+Claude de rédiger les 10 thèmes — en s'appuyant strictement sur les chiffres fournis pour les
+thèmes qui en ont (mesure d'impact, vie associative, perspectives), et en interprétant/rédigeant
+le reste (mot de la directrice, parcours, actions, interventions extérieures). La charte
+éditoriale AREA (postulats narratifs, lexique) est ré-embarquée dans cette route (elle vivait
+dans la révision IA, supprimée). **Repli automatique** sur `genererContenuBrouillon`
+(déterministe, mêmes 10 thèmes mais texte générique) si l'appel IA échoue — un message
+d'avertissement (`genererErreur`) prévient alors l'utilisateur, sans bloquer la génération.
+
+### Fermeture au clic extérieur — implémentée
+`lib/use-fermer-au-clic-exterieur.ts` (hook partagé) ferme n'importe quel menu ouvrant dès qu'on
+clique en dehors de son conteneur (bouton + panneau) — cliquer ailleurs équivaut à ne jamais
+avoir ouvert le menu. Appliqué aux 3 menus du module : "Ajouter un template" (dashboard),
+"Proposer des visuels pour cette diapositive" (chat), "Bibliothèque de templates" (éditeur).
+
+### 13 gabarits graphiques — implémentés (inspirés des "master templates" AREA)
+L'utilisateur a fourni 2 PDF "master template" (styles Moderne/Classique, 50 dispositions
+chacun). Analyse : pas 50 mises en page uniques, mais ~10 composants réutilisés avec des
+contenus différents. Plutôt qu'une réplique pixel-parfaite des 50, **10 gabarits curés** ont
+été ajoutés aux 3 génériques d'origine (`centre`/`bandeau`/`image-gauche`), soit 13 valeurs pour
+`Disposition` (`lib/rapports-data.ts`) : `couverture` (titre à crochets stylisés), `sommaire`
+(cartes numérotées), `separateur` (fond plein + numéro), `kpi-cartes` (pastilles rondes),
+`tableau` (2 colonnes), `barres-progression`, `territoire` (carte + zones), `temoignage`
+(citation), `swot` (grille 2×2), `cloture` (fond sombre). Chaque gabarit consomme un sac de
+champs optionnels partagé `DonneesGabarit` (`titre`, `sousTitre`, `numero`, `items`, `items2`,
+`chiffres`, `citation`, `auteur`) et se rabat sur le texte brut de la diapositive si ces champs
+sont absents — rendu dans `components/rapports/SlidePreview.tsx`.
+
+L'IA choisit le gabarit le plus adapté **par diapositive** (jamais un plaquage littéral des 50
+dispositions) lors de l'analyse d'un template — `analyserTemplate`/`suggererStylesGlobaux`
+(`app/api/rapports-template/route.ts`) renvoient désormais un tableau `gabarits: {index,
+disposition, donnees}[]`, un élément par segment du rapport, en plus du style de couleurs. Les
+champs de `donnees` sont **extraits/reformulés depuis le texte déjà rédigé** de chaque
+diapositive, jamais inventés (même règle stricte que pour le style : le document de référence
+n'influence que la forme, jamais le fond). `suggererVisuels` (menu par diapositive) et
+`choisirDisposition` (après ajout direct d'une photo) restent inchangés dans leur portée
+propre (le second reste volontairement limité à `centre`/`bandeau`/`image-gauche`, les seuls
+gabarits avec un emplacement photo).
+
+`gabarits[]` est appliqué en un coup à `dispositionParDiapositive` +
+`donneesGabaritParDiapositive` (état de `app/rapports/edition/[id]/page.tsx`) dès qu'un template
+est analysé — que ce soit depuis le dashboard (avant l'ouverture de l'éditeur : stocké
+temporairement sur `Brouillon.dispositionInitiale`/`donneesGabaritInitiales`, repris au
+chargement) ou depuis la Bibliothèque de templates de l'éditeur (Drive, suggestions IA, **et
+désormais import PDF direct** — 3ᵉ bouton du menu, même mécanisme que le dashboard).
+
+### Format A4 — vraie page sur le fichier Google Slides réel
+Case à cocher "Format A4" dans la barre du haut de l'éditeur, à côté de "Bibliothèque de
+templates" (`app/rapports/edition/[id]/page.tsx`, état `format: FormatRapport =
+"classique"|"a4"`). Bascule l'aperçu React (`SlidePreview` — `aspectRatio` 16:9 ↔ 210:297) ET la
+géométrie du vrai fichier Slides. **Contrainte API vérifiée** : `presentations.create()` accepte
+un `pageSize` personnalisé, mais aucune requête `batchUpdate` ne permet de redimensionner une
+présentation existante (`node_modules/googleapis/build/src/apis/slides/v1.d.ts`). Donc si le
+format demandé diffère de `brouillon.format` au moment de Sauvegarder/Valider, l'éditeur passe
+`nouveauFichier: true` à `syncSlide` (`lib/rapports-slides-api.ts` → `app/api/slides/route.ts`),
+ce qui force `reconstruireSlides` (`lib/google-slides-server.ts`) à créer une **toute nouvelle
+présentation** (nouveau `presentationId`) plutôt que réutiliser l'ancienne — `slideId`/`slideUrl`
+sont mis à jour sur le `Brouillon` en conséquence. L'ancien fichier Slides n'est **pas** supprimé
+automatiquement (reste sur Drive, cohérent avec le reste du module qui est best-effort).
+Dimensions EMU : 16:9 = 9144000×5143500 (existant), A4 portrait 210×297mm = 7560000×10692000
+(1mm = 36000 EMU). Toutes les fonctionnalités (gabarits, photos, chat, bibliothèque de
+templates) restent disponibles dans les deux formats.
+
+### Import de template/logo (dès la création) + assemblage IA — implémentés
+Le template et le logo s'importent sur le **dashboard** (`app/rapports/page.tsx`, section
+"Créer un nouveau rapport"), pas dans l'éditeur : 2 boutons **"Ajouter un template"** (PDF lu
+nativement par Gemini via `inlineData` base64, ou lien/ID Google Slides existant lu via
+`getSlidesClient()`) et **"Ajouter un logo"** (image). Choisis avant de cliquer "Générer" —
+mémorisés en state local (`templateSource`/`logoDataUrl`), aucun appel IA tant qu'on n'a pas
+généré. **Pas de PowerPoint (.pptx)** — non parsé nativement et aucun outil de conversion
+disponible dans cet environnement (PDF et Google Slides uniquement).
+- Au clic sur "Générer" (`handleGenerer`) : le contenu est généré, PUIS si un template est
+  présent, `analyserTemplate(source, undefined, segments)` (`lib/rapports-template-api.ts`) lui
+  transmet **le contenu déjà rédigé** pour qu'il assemble le tout "le plus graphiquement
+  possible", en respectant strictement disposition/typographie/couleurs du document de
+  référence — best-effort (échec → style par défaut + message d'erreur affiché, la génération
+  n'est jamais bloquée). Le logo (s'il y en a un) est stocké tel quel sur `Brouillon.logoUrl`,
+  indépendamment de l'analyse du template.
+- Backend : `app/api/rapports-template/route.ts` (Gemini via `fetch` natif, `gemini-2.5-flash`,
+  prompt "directeur de communication expérimenté"). `analyserTemplate` renvoie
+  `{ style, message }` — `style` = `StyleRapport` (`couleurPrincipale`, `couleurAccent`,
+  `disposition`, **`typographie: "moderne"|"classique"`** — 2 styles prédéfinis, pas de
+  chargement dynamique de police réelle, voir `POLICES` dans `lib/rapports-data.ts`).
+- **Disposition par diapositive choisie par l'IA** (plus de bascule fixe centre→image-gauche) :
+  nouvelle action `choisirDisposition` (même route), appelée à chaque fois qu'une photo atterrit
+  sur une diapositive — que ce soit via le bouton 📷 direct sur la diapositive sélectionnée
+  (`SlidePreview.tsx`) ou via le chat (`AiChatPanel.tsx`, après `placerPhoto`). Résultat stocké
+  dans `dispositionParDiapositive` (état de `app/rapports/edition/[id]/page.tsx`, par index de
+  diapositive) ; repli sur l'ancienne heuristique fixe uniquement si l'appel IA échoue.
+- `SlidePreview.tsx` prend `style`/`imagesParDiapositive`/`dispositionParDiapositive`/`logoUrl`
+  en props. `logoUrl` (si fourni par le brouillon) remplace le logo AREA par défaut. `style`
+  (donc la typographie choisie) est persisté sur le `Brouillon` (`handleSauvegarder`) mais
+  **pas synchronisé vers le vrai Google Slides** (qui reste texte brut).
+
+### Suppression (brouillons + historique) — implémentée
+Bouton 🗑️ sur chaque ligne du dashboard, avec confirmation explicite. **Supprime aussi le
+vrai fichier Google Slides sur Drive** s'il existe (`deleteDriveFile`, déjà présent dans
+`lib/google-sheets-server.ts`, exposé via l'action `supprimer` de `app/api/slides/route.ts` et
+`supprimerSlide` côté client) — irréversible, décision explicite de l'utilisateur.
+
+### Le template n'influence QUE le style, jamais le contenu
+Le prompt d'`analyserTemplate` (`app/api/rapports-template/route.ts`) interdit explicitement à
+l'IA de reprendre un fait, chiffre, date ou texte du document de référence importé — le contenu
+du rapport reste strictement celui généré pour la période sélectionnée par l'utilisateur ; seuls
+la couleur principale/accent, la disposition et la typographie peuvent en être extraits.
+
+### Photo : uniquement via le bouton direct sur la diapositive
+Le bouton "Photo" du chat a été retiré (`components/rapports/AiChatPanel.tsx`) — l'insertion de
+photo se fait uniquement via le bouton 📷 qui apparaît en haut à droite d'une diapositive
+**sélectionnée** dans `SlidePreview.tsx` (voir plus haut). L'action `placerPhoto` de l'API
+Rapports a été retirée avec (elle ne servait qu'à deviner l'index de diapositive depuis le
+chat — inutile maintenant que le bouton direct connaît déjà l'index).
+
+### Suggestions visuelles par diapositive — implémentées
+Quand une diapositive est sélectionnée, un bouton **"Proposer des visuels pour cette
+diapositive"** apparaît au-dessus de la zone de saisie du chat. Il déclenche l'action
+`suggererVisuels` (même route `app/api/rapports-template/route.ts`) qui croise le style actuel
+du rapport (issu du template importé s'il y en a un, sinon le style par défaut) avec le contenu
+propre à cette diapositive, et renvoie 3 suggestions (une par disposition disponible) avec un
+label et une description. Un menu s'ouvre à droite du bouton ; cliquer une suggestion applique
+sa disposition à cette diapositive via `dispositionParDiapositive` (même mécanisme que le choix
+automatique après ajout de photo). Un bouton **"Régénérer d'autres visuels"** en bas du menu
+relance le même appel pour obtenir 3 nouvelles propositions si les premières ne conviennent pas.
+
+### Bibliothèque de templates (globale) — implémentée
+En haut du panneau droit, au-dessus de `SlidePreview`, un bouton **"Bibliothèque de
+templates"** ouvre un menu proposant des variations de **style pour tout le deck** (pas une
+seule diapositive) — deux sources :
+- **Templates Drive** : liste des Google Slides du dossier `RAPPORTS_TEMPLATES_FOLDER_ID`
+  (action `listerTemplatesDrive`, `lib/google-sheets-server.ts` § `listerFichiersDriveDossier` —
+  tableau vide si le dossier n'est pas configuré, jamais d'erreur). Cliquer un template
+  l'analyse via `analyserTemplate` (déjà existant) et applique le style résultant à **tout**
+  le rapport (`setStyle`, pas `dispositionParDiapositive`).
+- **Suggestions IA** : action `suggererStylesGlobaux` (même route), qui propose 3 variations
+  complètes (couleurs + disposition + typographie) à partir du contenu entier du rapport, avec
+  un bouton "Régénérer" comme pour les suggestions par diapositive.
+
+### Hors périmètre (phases suivantes, PAS encore implémenté)
+- Import PowerPoint (.pptx) — pas d'outil de conversion disponible dans cet environnement.
+- Chargement dynamique d'une police exacte extraite d'un document (2 styles prédéfinis seulement).
+- Persistance durable des photos placées (upload Drive réel, comme `uploadToDrive` du module
+  Familles) — restent en mémoire navigateur pour l'instant.
+- Fidélité visuelle complète du vrai Slides (couleurs/disposition/typographie non poussées
+  vers le fichier réel, qui reste texte brut).
+- Chat en texte libre (sans pièce jointe) réellement intelligent — reste mocké.
+- Confirmation en 2 temps pour le template (analyse → question → réponse séparée) : analyse et
+  application se font en un seul aller-retour, l'instruction étant fournie avec l'import.
+- Densité visuelle "bilan annuel" du mockup React (demande reçue, indépendante du backend).
+- Journalisation `Apprentissage_IA` dans Sheets (boucle d'auto-apprentissage).
