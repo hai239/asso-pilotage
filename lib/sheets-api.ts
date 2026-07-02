@@ -32,6 +32,12 @@ export interface MembreSheet {
   Date_Inscription?: string
   Nb_Enfants: number | string
   Notes: string
+  // Champs d'inscription (payload de création uniquement, quand Beneficiaire === "Oui")
+  Annee_Scolaire?: string
+  Disponibilite?: string
+  Montant_Adhesion?: string | number
+  Montant_Inscription?: string | number
+  Remarques?: string
 }
 
 export interface FamilleSheet {
@@ -104,6 +110,26 @@ export function getStatut(statut: string): "EN COURS" | "ARRÊTÉ" | "SUSPENDU" 
   if (s.includes("ARRET") || s.includes("ARRÊT")) return "ARRÊTÉ"
   if (s.includes("SUSPEN")) return "SUSPENDU"
   return statut
+}
+
+// Format canonique d'année scolaire : "25-26" (attendu par parseAnneeScolaireEnd
+// et le tri des inscriptions — ne pas écrire d'autre format dans le Sheet)
+export function getCurrentAnneeScolaire(): string {
+  const now = new Date()
+  const baseYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
+  const y1 = String(baseYear % 100).padStart(2, "0")
+  const y2 = String((baseYear + 1) % 100).padStart(2, "0")
+  return `${y1}-${y2}`
+}
+
+export function getAnneeScolaireOptions(): string[] {
+  const now = new Date()
+  const baseYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
+  return [-1, 0, 1].map(offset => {
+    const y1 = String((baseYear + offset) % 100).padStart(2, "0")
+    const y2 = String((baseYear + offset + 1) % 100).padStart(2, "0")
+    return `${y1}-${y2}`
+  })
 }
 
 // ── Appels API ─────────────────────────────────
@@ -217,6 +243,60 @@ export async function fetchDocuments(idMembre: string): Promise<DocumentJoint[]>
 
 export async function deleteDocument(idDoc: string): Promise<{ ok: boolean }> {
   return apiPost({ action: "deleteDocument", idDoc }) as Promise<{ ok: boolean }>
+}
+
+// ── CONTENUS (Communication) ───────────────────
+
+export interface PostMedia {
+  nom: string
+  type: string
+  url?: string
+}
+
+export interface PostParticipantsSheet {
+  apprenantes: { id: number; prenom: string; nom: string }[]
+  benevoles: string[]
+  formatrices: string[]
+}
+
+export interface PostSheet {
+  id: number
+  categorie: string
+  date: string
+  titre: string
+  brief?: string
+  contenu?: string
+  media: PostMedia[]
+  plateforme: string[]
+  plateformeContenu: Record<string, { contenu?: string; tags?: string; lien?: string }>
+  statut: string
+  auteur: string
+  sessionId: number | null
+  participants?: PostParticipantsSheet
+}
+
+export async function fetchPosts(): Promise<PostSheet[]> {
+  return apiGet("getPosts") as Promise<PostSheet[]>
+}
+
+export async function addPost(data: Record<string, unknown>): Promise<{ ok: boolean; id: number }> {
+  return apiPost({ action: "addPost", data }) as Promise<{ ok: boolean; id: number }>
+}
+
+export async function updatePost(id: number, data: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return apiPost({ action: "updatePost", id, data }) as Promise<{ ok: boolean }>
+}
+
+export async function deletePost(id: number): Promise<{ ok: boolean }> {
+  return apiPost({ action: "deletePost", id }) as Promise<{ ok: boolean }>
+}
+
+export async function uploadPostMedia(data: {
+  nom: string
+  mimeType: string
+  dataBase64: string
+}): Promise<{ ok: boolean; url: string; fileId: string }> {
+  return apiPost({ action: "uploadPostMedia", ...data }) as Promise<{ ok: boolean; url: string; fileId: string }>
 }
 
 // ── Indicateur de configuration ────────────────

@@ -1696,8 +1696,18 @@ export default function AteliersPage() {
   function reloadAteliers() {
     setLoadingAteliers(true)
     return fetch("/api/sheets?action=getAteliers")
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((rows: AtelierSheet[]) => { setSessions(rows.map(atelierFromSheet)); setErreurAteliers(null) })
+      .then(r => (r.ok ? r.json() : r.json().then(
+        (body: { error?: string }) => Promise.reject(new Error(body.error || `HTTP ${r.status}`)),
+        () => Promise.reject(new Error(`HTTP ${r.status}`))
+      )))
+      .then((rows: AtelierSheet[]) => {
+        const sessions = rows.map(atelierFromSheet)
+        setSessions(sessions)
+        // Cross-module : Communication lit "asso-ateliers-sessions" en lecture seule
+        // pour préremplir les participants d'un post lié à un atelier.
+        localStorage.setItem(S_SESSIONS, JSON.stringify(sessions))
+        setErreurAteliers(null)
+      })
       .catch((e: Error) => { setSessions([]); setErreurAteliers(e.message) })
       .finally(() => setLoadingAteliers(false))
   }

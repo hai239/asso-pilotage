@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
-  sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureSheet,
-  uploadToDrive, getHeaders, deleteDriveFile,
+  sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureColumns, ensureSheet,
+  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID,
 } from "@/lib/google-sheets-server"
 
 type Sheets = ReturnType<typeof getSheetsClient>
+
+// Nom exact de la colonne PERSONNE portant le droit à l'image — source unique pour éviter
+// qu'une variante orthographique (accent, apostrophe) désynchronise lecture/écriture et
+// désactive silencieusement le floutage.
+const COL_DROIT_IMAGE = "Droit a l'image"
 
 // ── Réponses ──────────────────────────────────────────────
 
@@ -53,6 +58,8 @@ export async function GET(request: NextRequest) {
         return ok(await getSeances(sheets, searchParams.get("idAtelier") ?? undefined))
       case "getBeneficiaires":
         return ok(await getBeneficiaires(sheets, searchParams.get("audience") ?? undefined))
+      case "getPosts":
+        return ok(await getPosts(sheets))
       case "getEvaluations":
         return ok(await getEvaluations(sheets))
       default:
@@ -104,6 +111,10 @@ export async function POST(request: NextRequest) {
       case "deleteEvaluation":  return ok(await deleteEvaluation(sheets, body.idEvaluation))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
+      case "addPost":         return ok(await addPost(sheets, body.data))
+      case "updatePost":      return ok(await updatePost(sheets, body.id, body.data))
+      case "deletePost":      return ok(await deletePost(sheets, body.id))
+      case "uploadPostMedia": return ok(await uploadPostMedia(body))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -170,7 +181,7 @@ async function uploadFichier(sheets: Sheets, body: Record<string, unknown>) {
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `DOCUMENTS JOINTS!A${ligne}`,
-    valueInputOption: "USER_ENTERED",
+    valueInputOption: "RAW",
     requestBody: { values: [row] },
   })
 
@@ -194,6 +205,128 @@ async function deleteDocument(sheets: Sheets, idDoc: string) {
   }
   const supprime = await deleteRowById(sheets, "DOCUMENTS JOINTS", String(idDoc))
   return supprime ? { ok: true } : { error: "Document introuvable" }
+}
+
+// ── CONTENUS (Communication) ──────────────────────────────
+// Colonnes existantes : ID | Titre | Contenu principal | Image | Vidéo | Tags | État  |
+//                       Date programmée | Plateforme RS | Catégorie  | Event ID
+// Colonnes ajoutées (ensureColumns) pour couvrir la richesse de l'app :
+//   Auteur | Brief | Plateforme Contenu (JSON) | Participants (JSON) | Session ID
+const CONTENUS_COLONNES_ETENDUES = ["Auteur", "Brief", "Plateforme Contenu", "Participants", "Session ID"]
+
+function rowToPost(r: Record<string, unknown>) {
+  let plateformeContenu: Record<string, unknown> = {}
+  try { plateformeContenu = JSON.parse(String(r["Plateforme Contenu"] ?? "{}")) } catch { /* JSON invalide, ignore */ }
+  let participants: unknown = undefined
+  try { participants = r["Participants"] ? JSON.parse(String(r["Participants"])) : undefined } catch { /* ignore */ }
+
+  const media: { nom: string; type: string; url: string }[] = []
+  if (r["Image"]) media.push({ nom: "image", type: "image", url: String(r["Image"]) })
+  if (r["Vidéo"]) media.push({ nom: "vidéo", type: "video", url: String(r["Vidéo"]) })
+
+  return {
+    id: Number(r["ID"]),
+    categorie: String(r["Catégorie "] || "autre"),
+    date: String(r["Date programmée"] ?? ""),
+    titre: String(r["Titre"] ?? ""),
+    brief: String(r["Brief"] ?? ""),
+    contenu: String(r["Contenu principal"] ?? ""),
+    media,
+    plateforme: String(r["Plateforme RS"] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    plateformeContenu,
+    statut: String(r["État "] || "brouillon"),
+    auteur: String(r["Auteur"] ?? ""),
+    sessionId: r["Session ID"] ? Number(r["Session ID"]) : null,
+    participants,
+  }
+}
+
+/** Ne remplit que les colonnes explicitement fournies dans `data` (update partiel). */
+function postWriteMap(data: Record<string, unknown>): Record<string, unknown> {
+  const map: Record<string, unknown> = {}
+  if (data.titre !== undefined) map["Titre"] = data.titre
+  if (data.contenu !== undefined) map["Contenu principal"] = data.contenu
+  if (data.media !== undefined) {
+    const media = (data.media as Array<{ type: string; url?: string }> | undefined) ?? []
+    map["Image"] = media.find((m) => m.type === "image")?.url ?? ""
+    map["Vidéo"] = media.find((m) => m.type === "video")?.url ?? ""
+  }
+  if (data.statut !== undefined) map["État "] = data.statut
+  if (data.date !== undefined) map["Date programmée"] = data.date
+  if (data.plateforme !== undefined) map["Plateforme RS"] = Array.isArray(data.plateforme) ? data.plateforme.join(",") : ""
+  if (data.categorie !== undefined) map["Catégorie "] = data.categorie
+  if (data.auteur !== undefined) map["Auteur"] = data.auteur
+  if (data.brief !== undefined) map["Brief"] = data.brief
+  if (data.plateformeContenu !== undefined) map["Plateforme Contenu"] = JSON.stringify(data.plateformeContenu ?? {})
+  if (data.participants !== undefined) map["Participants"] = data.participants ? JSON.stringify(data.participants) : ""
+  if (data.sessionId !== undefined) map["Session ID"] = data.sessionId ?? ""
+  return map
+}
+
+async function getPosts(sheets: Sheets) {
+  const rows = await sheetToObjects(sheets, "CONTENUS")
+  return rows.map(rowToPost)
+}
+
+async function addPost(sheets: Sheets, data: Record<string, unknown>) {
+  await ensureColumns(sheets, "CONTENUS", CONTENUS_COLONNES_ETENDUES)
+  const id = await nextId(sheets, "CONTENUS")
+  const headers = await getHeaders(sheets, "CONTENUS")
+  const valeurs: Record<string, unknown> = { "ID": id, ...postWriteMap(data) }
+  const row = headers.map((h) => (valeurs[h] !== undefined ? String(valeurs[h]) : ""))
+
+  // ⚠️ Ne pas utiliser appendRow/values.append ici : sur une feuille neuve/clairsemée avec une
+  // grille large (colonnes bien au-delà des en-têtes), l'auto-détection de tableau de l'API Sheets
+  // se trompe et décale les valeurs de plusieurs colonnes (constaté : décalage de colonnes qui
+  // grandit à chaque appel). On écrit donc à une plage explicite, comme pour DOCUMENTS JOINTS.
+  const colA = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "CONTENUS!A2:A" })
+  const aVals = colA.data.values ?? []
+  let ligne = aVals.length + 2
+  for (let i = 0; i < aVals.length; i++) {
+    if (!aVals[i] || !aVals[i][0]) { ligne = i + 2; break }
+  }
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `CONTENUS!A${ligne}`,
+    valueInputOption: "RAW",
+    requestBody: { values: [row] },
+  })
+  return { ok: true, id }
+}
+
+async function updatePost(sheets: Sheets, id: number, data: Record<string, unknown>) {
+  await ensureColumns(sheets, "CONTENUS", CONTENUS_COLONNES_ETENDUES)
+  const updated = await updateRowById(sheets, "CONTENUS", id, postWriteMap(data))
+  return updated ? { ok: true } : { error: "Post introuvable" }
+}
+
+async function deletePost(sheets: Sheets, id: number) {
+  // Best-effort : supprimer les médias Drive associés (Image / Vidéo)
+  const rows = await sheetToObjects(sheets, "CONTENUS")
+  const row = rows.find((r) => String(r["ID"]) === String(id))
+  if (row) {
+    for (const col of ["Image", "Vidéo"]) {
+      // "Image" = thumbnail?id=... ; "Vidéo" = webViewLink /file/d/{id}/view
+      const url = String(row[col] ?? "")
+      const m = /[?&]id=([^&]+)/.exec(url) ?? /\/file\/d\/([^/]+)/.exec(url)
+      if (m) { try { await deleteDriveFile(m[1]) } catch { /* le compte de service ne peut pas toujours supprimer */ } }
+    }
+  }
+  const deleted = await deleteRowById(sheets, "CONTENUS", id)
+  return deleted ? { ok: true } : { error: "Post introuvable" }
+}
+
+async function uploadPostMedia(body: Record<string, unknown>) {
+  const nom = String(body.nom ?? "media")
+  const mimeType = String(body.mimeType ?? "application/octet-stream")
+  const dataBase64 = String(body.dataBase64 ?? "")
+  if (!dataBase64) return { error: "Fichier vide" }
+  const { fileId, url: webViewLink } = await uploadToDrive(nom, mimeType, dataBase64, COMMUNICATION_MEDIA_FOLDER_ID)
+  await makeFilePublic(fileId) // rend le fichier lisible par lien (le lien "uc?export=download" renvoyé n'est pas utilisable en <img> inline)
+  // Pour les images : endpoint "thumbnail" de Drive, conçu pour l'affichage inline (contrairement à uc?export=download/view, peu fiable en <img src>).
+  // Pour les vidéos : pas de lecteur inline pour l'instant, on garde le lien de visualisation Drive.
+  const url = mimeType.startsWith("image/") ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600` : webViewLink
+  return { ok: true, url, fileId }
 }
 
 // ── POSITIONNEMENT ────────────────────────────────────────
@@ -312,7 +445,7 @@ async function getPaiements(sheets: Sheets, idMembre: string) {
 }
 
 async function getEvenements(sheets: Sheets, categorie?: string) {
-  const rows = await sheetToObjects(sheets, "EVENEMENT")
+  const rows = await sheetToObjects(sheets, "EVENEMENT2")
   return rows
     .filter((r) => !categorie || String(r["Categorie"]).toLowerCase() === categorie.toLowerCase())
     .map((r) => ({
@@ -465,6 +598,7 @@ async function getBeneficiaires(sheets: Sheets, audience?: string) {
         Disponibilite: lastInsc ? (lastInsc["Disponibilite"] ?? "") : "",
         Type_Apprenant: lastInsc ? (lastInsc["Type apprenant"] ?? "") : "",
         Niveau_CECRL: evalInitiale ? (evalInitiale["Niveau attribue"] ?? "") : "",
+        Droit_Image: p[COL_DROIT_IMAGE] ?? "",
         notes: {
           comprehensionEcrite: numOrNull(evalInitiale?.["Note comprehension ecrite"]),
           comprehensionOrale:  numOrNull(evalInitiale?.["Note comprehension orale"]),
@@ -632,26 +766,30 @@ async function addMembre(sheets: Sheets, data: Record<string, unknown>) {
     "Email": data.Email ?? "",
     "Pays d'origine": data.Pays_Origine ?? "",
     "Langue maternelle": data.Langue_Maternelle ?? "",
-    "Droit a l'image": data.Droit_Image ?? "",
+    [COL_DROIT_IMAGE]: data.Droit_Image ?? "",
     "Charte d'engagement": data.Charte ?? "",
     "Beneficiaire": data.Beneficiaire ?? "",
     "Commentaire": data.Notes ?? "",
   })
 
-  if (data.Niveau || data.Statut_Inscription || data.Date_Inscription) {
+  // Une inscription n'est créée que si la personne est bénéficiaire.
+  // Statut, Type apprenant et Date d'inscription sont déterminés automatiquement.
+  if (String(data.Beneficiaire) === "Oui") {
     const inscId = await nextId(sheets, "INSCRIPTION")
+    const isEnfant = String(data.Role) === "Enfant"
     await appendRow(sheets, "INSCRIPTION", {
       "ID": inscId,
       "Personne ID": id,
       "Annee scolaire": data.Annee_Scolaire ?? "",
-      "Type apprenant": data.Type_Apprenant ?? "",
-      "Statut": data.Statut_Inscription ?? "",
-      "Niveau / Classe": data.Niveau ?? "",
+      "Type apprenant": isEnfant ? "Soutien scolaire" : "FLE",
+      "Statut": "EN COURS",
+      "Niveau / Classe": isEnfant ? (data.Niveau ?? "") : "",
+      "Disponibilite": data.Disponibilite ?? "",
       "Orientation": data.Source_Orientation ?? "",
-      "Date d'inscription": data.Date_Inscription
-        ? parseDateFr(String(data.Date_Inscription))
-        : new Date().toISOString().split("T")[0],
-      "Montant d'inscription": 30,
+      "Date d'inscription": new Date().toISOString().split("T")[0],
+      "Montant adhesion": data.Montant_Adhesion ?? "",
+      "Montant d'inscription": data.Montant_Inscription ?? "",
+      "Remarques": data.Remarques ?? "",
     })
   }
 
@@ -670,7 +808,7 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
   if (data.Email !== undefined)            pmap["Email"] = data.Email
   if (data.Pays_Origine !== undefined)     pmap["Pays d'origine"] = data.Pays_Origine
   if (data.Langue_Maternelle !== undefined) pmap["Langue maternelle"] = data.Langue_Maternelle
-  if (data.Droit_Image !== undefined)      pmap["Droit a l'image"] = data.Droit_Image
+  if (data.Droit_Image !== undefined)      pmap[COL_DROIT_IMAGE] = data.Droit_Image
   if (data.Charte !== undefined)           pmap["Charte d'engagement"] = data.Charte
   if (data.Beneficiaire !== undefined)     pmap["Beneficiaire"] = data.Beneficiaire
   if (data.Notes !== undefined)            pmap["Commentaire"] = data.Notes
@@ -695,10 +833,18 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
     const inscriptions = await sheetToObjects(sheets, "INSCRIPTION")
     const persoInsc = inscriptions.filter((i) => String(i["Personne ID"]) === String(idMembre))
 
+    // Le formulaire d'édition envoie ces clés à "" pour un membre sans
+    // inscription (Beneficiaire = Non) : ne créer une ligne INSCRIPTION
+    // que si au moins une valeur est réellement renseignée.
+    const hasValeurInscription = [
+      data.Statut_Inscription, data.Niveau, data.Type_Apprenant,
+      data.Source_Orientation, data.Date_Inscription,
+    ].some((v) => v !== undefined && String(v).trim() !== "")
+
     if (persoInsc.length > 0) {
       const latest = persoInsc[persoInsc.length - 1]
       await updateRowById(sheets, "INSCRIPTION", String(latest["ID"]), imap)
-    } else {
+    } else if (hasValeurInscription) {
       const inscId = await nextId(sheets, "INSCRIPTION")
       await appendRow(sheets, "INSCRIPTION", {
         "ID": inscId,
@@ -810,8 +956,8 @@ async function updateInscription(sheets: Sheets, idInscription: string, data: Re
 // ── ÉCRITURE ÉVÉNEMENT ────────────────────────────────────
 
 async function addEvenement(sheets: Sheets, data: Record<string, unknown>) {
-  const id = await nextId(sheets, "EVENEMENT")
-  await appendRow(sheets, "EVENEMENT", {
+  const id = await nextId(sheets, "EVENEMENT2")
+  await appendRow(sheets, "EVENEMENT2", {
     "ID": id,
     "Titre": data.Titre ?? "",
     "Date": data.Date ? parseDateFr(String(data.Date)) : "",
@@ -835,12 +981,12 @@ async function updateEvenement(sheets: Sheets, idEvenement: string, data: Record
   if (data.Animateur !== undefined)  map["Animateur"] = data.Animateur
   if (data.Categorie !== undefined)  map["Categorie"] = data.Categorie
   if (data.Statut !== undefined)     map["Statut"] = data.Statut
-  const ok = await updateRowById(sheets, "EVENEMENT", idEvenement, map)
+  const ok = await updateRowById(sheets, "EVENEMENT2", idEvenement, map)
   return ok ? { ok: true } : { error: "Événement introuvable" }
 }
 
 async function deleteEvenement(sheets: Sheets, idEvenement: string) {
-  const ok = await deleteRowById(sheets, "EVENEMENT", idEvenement)
+  const ok = await deleteRowById(sheets, "EVENEMENT2", idEvenement)
   return ok ? { ok: true } : { error: "Événement introuvable" }
 }
 
@@ -1145,7 +1291,7 @@ function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unkn
     Telephone: p["Telephone"],
     Email: p["Email"],
     WhatsApp: "",
-    Droit_Image: p["Droit a l'image"],
+    Droit_Image: p[COL_DROIT_IMAGE],
     Charte: p["Charte d'engagement"],
     Beneficiaire: p["Beneficiaire"],
     Statut_Inscription: d ? d["Statut"] : "",
