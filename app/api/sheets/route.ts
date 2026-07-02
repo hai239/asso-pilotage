@@ -1499,7 +1499,8 @@ async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
     for (const s of seancesAtelier) {
       const sid = String(s["Séance ID"] ?? s["ID"])
       const presence = assiduite.find((a) => String(a["Personne ID"]) === personneId && String(a["Seance ID"] ?? "") === sid)
-      if (presence && String(presence["ETAT"] ?? "") !== "Présent") continue
+      const etat = String(presence?.["ETAT"] ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      if (presence && etat !== "present") continue
       total += minutesFromHeures(s["Heure debut"], s["Heure fin"])
     }
     return total
