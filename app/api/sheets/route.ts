@@ -581,7 +581,18 @@ async function getAteliers(sheets: Sheets, audience?: string) {
     .filter((a) => !audience || String(a["Audience"]).toLowerCase() === audience.toLowerCase())
     .map((a) => {
       const id = String(a["ID"])
-      const liens = participants.filter((l) => String(l["Atelier ID"]) === id)
+      // Séances de cet atelier (EVENEMENT2, Type = "séance", "Atelier ID" = parent).
+      // Un·e intervenant·e peut être rattaché·e au niveau séance (ligne
+      // ATELIER_PARTICIPANT avec seulement "Seance ID"), pas seulement au niveau
+      // atelier — on inclut ces liens pour ne pas les masquer.
+      const idsSeances = new Set(
+        evenements
+          .filter((s) => String(s["Type"] ?? "").toLowerCase() === "séance" && String(s["Atelier ID"]) === id)
+          .map((s) => String(s["Séance ID"] ?? s["ID"]))
+      )
+      const liens = participants.filter((l) =>
+        String(l["Atelier ID"]) === id || idsSeances.has(String(l["Seance ID"] ?? ""))
+      )
       const beneficiaireIds = Array.from(new Set(
         liens
           .filter((l) => l["Role"] === "Beneficiaire")
@@ -600,7 +611,9 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         ID_Atelier: id,
         Categorie: a["Categorie"] ?? "",
         Groupe: a["Groupe"] ?? "",
-        Titre: a["Nom atelier"] ?? "",
+        // Repli sur l'ancienne colonne "Titre" : les ateliers créés avant le
+        // renommage n'ont pas de "Nom atelier" → éviter un titre vide.
+        Titre: a["Nom atelier"] || a["Titre"] || "",
         Audience: a["Audience"] ?? "",
         Date_Debut: fmtDate(a["Date debut"] as string),
         Date_Fin: fmtDate(a["Date fin"] as string),
@@ -1219,6 +1232,9 @@ async function addAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
+  // "Nom atelier" est une colonne nouvelle (ancien nom : "Titre") — la garantir
+  // avant l'écriture, sinon la valeur serait silencieusement ignorée.
+  await ensureColumn(sheets, "EVENEMENT2", "Nom atelier")
   const id = await nextId(sheets, "EVENEMENT2")
   await appendRow(sheets, "EVENEMENT2", { "ID": id, "Atelier ID": id, ...atelierRow(data) })
   await syncAtelierLiens(sheets, id, beneficiaireIds ?? [], intervenantIds ?? [])
@@ -1232,6 +1248,7 @@ async function updateAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
+  await ensureColumn(sheets, "EVENEMENT2", "Nom atelier")
   const updated = await updateRowById(sheets, "EVENEMENT2", idAtelier, atelierRow(data))
   if (!updated) return { error: "Atelier introuvable" }
   await syncAtelierLiens(sheets, idAtelier, beneficiaireIds, intervenantIds)
@@ -1499,7 +1516,8 @@ async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
     for (const s of seancesAtelier) {
       const sid = String(s["Séance ID"] ?? s["ID"])
       const presence = assiduite.find((a) => String(a["Personne ID"]) === personneId && String(a["Seance ID"] ?? "") === sid)
-      if (presence && String(presence["ETAT"] ?? "") !== "Présent") continue
+      const etat = String(presence?.["ETAT"] ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      if (presence && etat !== "present") continue
       total += minutesFromHeures(s["Heure debut"], s["Heure fin"])
     }
     return total
