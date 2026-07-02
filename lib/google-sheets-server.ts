@@ -96,6 +96,25 @@ export async function exportDriveFileAsPdf(fileId: string): Promise<Buffer> {
   return Buffer.from(res.data as ArrayBuffer)
 }
 
+/** Crée un sous-dossier dans parentFolderId, ou le retourne s'il existe déjà. */
+export async function createOrGetFolder(name: string, parentFolderId: string): Promise<string> {
+  const drive = getDriveClient()
+  const safeName = name.replace(/'/g, "\\'")
+  const res = await drive.files.list({
+    q: `name='${safeName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: "files(id)",
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  })
+  if (res.data.files && res.data.files.length > 0) return res.data.files[0].id!
+  const folder = await drive.files.create({
+    requestBody: { name, mimeType: "application/vnd.google-apps.folder", parents: [parentFolderId] },
+    fields: "id",
+    supportsAllDrives: true,
+  })
+  return folder.data.id!
+}
+
 /** Upload un fichier (base64) dans un dossier Drive donné. Renvoie le lien Drive. */
 export async function uploadToDrive(
   nom: string,

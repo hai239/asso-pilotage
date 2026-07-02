@@ -287,6 +287,8 @@ export interface PostSheet {
   plateformeContenu: Record<string, { contenu?: string; tags?: string; lien?: string }>
   statut: string
   auteur: string
+  commentaire?: string
+  categorieAtelier?: string
   sessionId: number | null
   participants?: PostParticipantsSheet
 }
@@ -311,6 +313,8 @@ export async function uploadPostMedia(data: {
   nom: string
   mimeType: string
   dataBase64: string
+  titre?: string
+  date?: string
 }): Promise<{ ok: boolean; url: string; fileId: string }> {
   return apiPost({ action: "uploadPostMedia", ...data }) as Promise<{ ok: boolean; url: string; fileId: string }>
 }

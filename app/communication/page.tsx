@@ -56,11 +56,13 @@ interface Post {
   titre: string
   brief?: string
   contenu?: string
+  commentaire?: string
   media?: MediaItem[]
   plateforme: Plateforme[]
   plateformeContenu: Partial<Record<Plateforme, PlatformeContent>>
   statut: ValidationStatus
   auteur: string
+  categorieAtelier?: string
   sessionId?: number | null
   participants?: PostParticipants
 }
@@ -69,9 +71,10 @@ interface SessionSlim {
   id: number
   titre: string
   date: string
+  categorie: string
   beneficiaireIds: number[]
   benevoleIds?: number[]
-  intervenantIds?: number[]
+  intervenantIds?: string[]
 }
 
 interface IntervenantSlim {
@@ -96,6 +99,7 @@ interface AtelierSheetRow {
   Groupe: string
   Date_Debut: string
   beneficiaireIds: string[]
+  intervenants?: { ID_Intervenant: string }[]
 }
 
 interface BeneficiaireSheetRow {
@@ -121,9 +125,9 @@ const STATUT_ICON: Record<ValidationStatus, LucideIcon> = {
 }
 
 const PlatIcon = ({ p }: { p: Plateforme }) => {
-  if (p === "Instagram") return <span className="text-[10px] font-bold">IG</span>
-  if (p === "LinkedIn")  return <span className="text-[10px] font-bold">LI</span>
-  return <span className="text-[10px] font-bold">FB</span>
+  if (p === "Instagram") return <span className="text-xs font-bold">IG</span>
+  if (p === "LinkedIn")  return <span className="text-xs font-bold">LI</span>
+  return <span className="text-xs font-bold">FB</span>
 }
 
 const plateformeStyle: Record<Plateforme, string> = {
@@ -257,10 +261,11 @@ function PostPreviewCard({ platform, contenu, tags, media }: {
 // ──────────────────────────────────────────────
 // Calendrier éditorial
 // ──────────────────────────────────────────────
-function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: string) => void }) {
+function CalendrierTab({ posts, onNewPost, onEdit }: { posts: Post[]; onNewPost: (date: string) => void; onEdit: (p: Post) => void }) {
   const today = new Date()
   const [displayYear, setDisplayYear] = useState(today.getFullYear())
   const [displayMonth, setDisplayMonth] = useState(today.getMonth())
+  const [hoveredDay, setHoveredDay] = useState<number | null>(null)
 
   const year = displayYear
   const month = displayMonth
@@ -351,10 +356,10 @@ function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: 
           })}
         </div>
       </div>
-      <div className="flex items-center gap-2 py-1">
+      <div className="flex items-center justify-center gap-2 py-1">
         {PLATEFORMES.filter((pl) => (platformCounts[pl] ?? 0) > 0).map((pl) => (
-          <span key={pl} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${plateformeStyle[pl]}`}>
-            <PlatIcon p={pl} /> {platformCounts[pl]}
+          <span key={pl} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${plateformeStyle[pl]}`}>
+            {pl} {platformCounts[pl]}
           </span>
         ))}
         {Object.keys(platformCounts).length === 0 && (
@@ -368,26 +373,59 @@ function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: 
         {cells.map((day, i) => {
           if (!day) return <div key={i} />
           const isToday = day === today.getDate() && year === today.getFullYear() && month === today.getMonth()
+          const isHovered = hoveredDay === day
           const dayPosts = postsByDay[day] ?? []
           const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
           return (
             <div
               key={i}
               onClick={() => onNewPost(dateStr)}
-              className={`min-h-24 rounded-lg border p-1.5 text-xs cursor-pointer ${isToday ? "border-ateliers bg-ateliers-light hover:bg-ateliers-light/80" : "border-border bg-surface hover:bg-slate-50"}`}
+              onMouseEnter={() => setHoveredDay(day)}
+              onMouseLeave={() => setHoveredDay(null)}
+              className={`relative min-h-24 rounded-lg border p-1.5 text-xs cursor-pointer ${isToday ? "border-ateliers bg-ateliers-light hover:bg-ateliers-light/80" : "border-border bg-surface hover:bg-slate-50"}`}
             >
-              <div className={`font-semibold mb-1 ${isToday ? "text-ateliers-dark" : "text-muted"}`}>{day}</div>
-              {dayPosts.map((p) => {
+              <div className="flex items-center justify-between mb-1">
+                <span className={`font-semibold ${isToday ? "text-ateliers-dark" : "text-muted"}`}>{day}</span>
+                {isHovered && (
+                  <span className="w-4 h-4 rounded-full bg-slate-900 text-white flex items-center justify-center leading-none text-[10px] font-bold shrink-0">+</span>
+                )}
+              </div>
+              {dayPosts.map((p, pi) => {
                 const Icon = STATUT_ICON[p.statut]
+                const col = i % 7
+                const tooltipSide = col >= 4 ? "right-0" : "left-0"
                 return (
-                  <div
-                    key={p.id}
-                    onClick={(e) => e.stopPropagation()}
-                    className={`flex items-center gap-1 mb-0.5 px-1 py-0.5 rounded ${statutBg[p.statut]}`}
-                    title={p.statut}
-                  >
-                    <Icon size={11} className="shrink-0" />
-                    <span className="truncate text-[10px] font-medium">{p.titre}</span>
+                  <div key={p.id} className="relative group/chip">
+                    <div
+                      onClick={(e) => { e.stopPropagation(); onEdit(p) }}
+                      className={`flex items-center gap-1 mb-0.5 px-1 py-0.5 rounded cursor-pointer hover:brightness-95 transition-[filter] ${statutBg[p.statut]}`}
+                      title={p.statut}
+                    >
+                      <Icon size={11} className="shrink-0" />
+                      <span className="truncate text-[10px] font-medium">{p.titre}</span>
+                    </div>
+                    <div className={`hidden group-hover/chip:flex flex-col gap-2 absolute bottom-full ${tooltipSide} z-50 mb-1 w-64 bg-white rounded-xl shadow-xl border border-border overflow-hidden pointer-events-none`}>
+                      {(() => {
+                        const img = p.media?.find(m => m.type === "image")
+                        const src = img?.preview ?? img?.url
+                        return src ? <img src={src} alt={p.titre} className="w-full aspect-video object-cover" /> : null
+                      })()}
+                      <div className="px-3 pb-3 flex flex-col gap-1.5">
+                        <p className="text-xs font-semibold text-foreground leading-snug">{p.titre}</p>
+                        {(p.contenu || "") && (
+                          <p className="text-[11px] text-muted leading-relaxed line-clamp-3 whitespace-pre-line">{p.contenu}</p>
+                        )}
+                        {p.plateforme.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-0.5">
+                            {p.plateforme.map(pl => (
+                              <span key={pl} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${plateformeStyle[pl]}`}>
+                                <PlatIcon p={pl} /> {pl}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )
               })}
@@ -498,11 +536,12 @@ const emptyParticipants = (): PostParticipants => ({ apprenantes: [], benevoles:
 const emptyPost = (): Omit<Post, "id"> => ({
   categorie: "autre",
   date: new Date().toISOString().split("T")[0],
-  titre: "", brief: "", contenu: "",
+  titre: "", brief: "", contenu: "", commentaire: "",
   media: [],
-  plateforme: ["Instagram"],
+  plateforme: ["LinkedIn"],
   plateformeContenu: {},
   statut: "brouillon", auteur: "",
+  categorieAtelier: "",
   sessionId: null,
   participants: emptyParticipants(),
 })
@@ -518,11 +557,13 @@ function sheetPostToPost(p: {
   titre: string
   brief?: string
   contenu?: string
+  commentaire?: string
   media: { nom: string; type: string; url?: string }[]
   plateforme: string[]
   plateformeContenu: Record<string, PlatformeContent>
   statut: string
   auteur: string
+  categorieAtelier?: string
   sessionId: number | null
   participants?: PostParticipants
 }): Post {
@@ -533,11 +574,13 @@ function sheetPostToPost(p: {
     titre: p.titre,
     brief: p.brief ?? "",
     contenu: p.contenu ?? "",
+    commentaire: p.commentaire ?? "",
     media: p.media.map(m => ({ nom: m.nom, type: m.type, url: m.url })),
-    plateforme: p.plateforme.filter((pl): pl is Plateforme => (ALL_PLATEFORMES as string[]).includes(pl)),
+    plateforme: ALL_PLATEFORMES.filter(pl => (p.plateforme as string[]).includes(pl)),
     plateformeContenu: p.plateformeContenu as Partial<Record<Plateforme, PlatformeContent>>,
     statut: ALL_STATUTS.includes(p.statut as ValidationStatus) ? (p.statut as ValidationStatus) : "brouillon",
     auteur: p.auteur,
+    categorieAtelier: p.categorieAtelier ?? "",
     sessionId: p.sessionId,
     participants: p.participants,
   }
@@ -558,6 +601,7 @@ export default function CommunicationPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [videoUrl, setVideoUrl] = useState("")
 
   const [rejectedIds, setRejectedIds] = useState<number[]>([])
 
@@ -586,19 +630,24 @@ export default function CommunicationPage() {
   // pour que le floutage se base sur les vraies fiches Familles, pas sur des données de seed.
   const loadAteliersEtBeneficiaires = useCallback(async () => {
     try {
-      const [ateliersRes, benefRes] = await Promise.all([
+      const [ateliersRes, benefRes, intervenantsRes] = await Promise.all([
         fetch("/api/sheets?action=getAteliers"),
         fetch("/api/sheets?action=getBeneficiaires"),
+        fetch("/api/sheets?action=getIntervenants"),
       ])
       const ateliersRows: AtelierSheetRow[] = ateliersRes.ok ? await ateliersRes.json() : []
       const benefRows: BeneficiaireSheetRow[] = benefRes.ok ? await benefRes.json() : []
+      const intervenantsRows: IntervenantSlim[] = intervenantsRes.ok ? await intervenantsRes.json() : []
 
       setSessions(ateliersRows.map(a => ({
         id: Number(a.ID_Atelier),
         titre: a.Titre || [a.Categorie, a.Groupe].filter(Boolean).join(" · "),
         date: frToIso(a.Date_Debut),
+        categorie: a.Categorie ?? "",
         beneficiaireIds: a.beneficiaireIds.map(Number).filter(n => !isNaN(n)),
+        intervenantIds: (a.intervenants ?? []).map(i => i.ID_Intervenant).filter(Boolean),
       })))
+      setIntervenants(intervenantsRows)
 
       setBeneficiaires(benefRows.map(b => {
         const raw = String(b.Droit_Image ?? "").trim()
@@ -653,8 +702,9 @@ export default function CommunicationPage() {
     setEditing(null)
     const p = emptyPost()
     setForm(p)
-    setActivePlatformTab(p.plateforme[0] ?? "Instagram")
+    setActivePlatformTab(p.plateforme[0] ?? "LinkedIn")
     setNewFormatrice("")
+    setVideoUrl("")
     setGenerateError(null)
     setSlideOpen(true)
   }
@@ -663,8 +713,9 @@ export default function CommunicationPage() {
     setEditing(null)
     const p = { ...emptyPost(), date }
     setForm(p)
-    setActivePlatformTab(p.plateforme[0] ?? "Instagram")
+    setActivePlatformTab(p.plateforme[0] ?? "LinkedIn")
     setNewFormatrice("")
+    setVideoUrl("")
     setGenerateError(null)
     setSlideOpen(true)
   }
@@ -674,6 +725,9 @@ export default function CommunicationPage() {
     setForm({
       ...p,
       brief: p.brief ?? "",
+      contenu: p.contenu ?? "",
+      commentaire: p.commentaire ?? "",
+      categorieAtelier: p.categorieAtelier ?? "",
       plateforme: [...p.plateforme],
       media: [...(p.media ?? [])],
       plateformeContenu: { ...p.plateformeContenu },
@@ -681,7 +735,9 @@ export default function CommunicationPage() {
         ? { ...p.participants, apprenantes: [...p.participants.apprenantes], benevoles: [...p.participants.benevoles], formatrices: [...p.participants.formatrices] }
         : emptyParticipants(),
     })
-    setActivePlatformTab(p.plateforme[0] ?? "Instagram")
+    const videoItem = (p.media ?? []).find(m => m.type === "video")
+    setVideoUrl(videoItem?.url ?? "")
+    setActivePlatformTab(p.plateforme[0] ?? "LinkedIn")
     setNewFormatrice("")
     setGenerateError(null)
     setSlideOpen(true)
@@ -765,8 +821,9 @@ export default function CommunicationPage() {
 
   function togglePlateforme(pl: Plateforme) {
     setForm((f) => {
-      const newList = f.plateforme.includes(pl) ? f.plateforme.filter((x) => x !== pl) : [...f.plateforme, pl]
-      setActivePlatformTab(newList.includes(activePlatformTab) ? activePlatformTab : (newList[0] ?? "Instagram"))
+      const raw = f.plateforme.includes(pl) ? f.plateforme.filter((x) => x !== pl) : [...f.plateforme, pl]
+      const newList = ALL_PLATEFORMES.filter(p => raw.includes(p))
+      setActivePlatformTab(newList.includes(activePlatformTab) ? activePlatformTab : (newList[0] ?? "LinkedIn"))
       return { ...f, plateforme: newList }
     })
   }
@@ -801,7 +858,7 @@ export default function CommunicationPage() {
           ],
         }))
         try {
-          const res = await uploadPostMedia({ nom: file.name, mimeType: file.type, dataBase64 })
+          const res = await uploadPostMedia({ nom: file.name, mimeType: file.type, dataBase64, titre: form.titre, date: form.date })
           setForm(f => ({
             ...f,
             media: (f.media ?? []).map(m => (m.type === type && m.nom === file.name) ? { ...m, url: res.url, uploading: false } : m),
@@ -823,19 +880,35 @@ export default function CommunicationPage() {
     setForm(f => ({ ...f, media: (f.media ?? []).filter((_, i) => i !== index) }))
   }
 
-  function handleSessionChange(val: string) {
-    const id = val ? Number(val) : null
-    if (!id) { setForm(f => ({ ...f, sessionId: null, participants: emptyParticipants() })); return }
-    const session = sessions.find(s => s.id === id)
-    if (!session) return
-    const apprenantes = session.beneficiaireIds
+  function handleCategorieAtelierChange(val: string) {
+    if (!val) {
+      setForm(f => ({ ...f, categorieAtelier: "", sessionId: null, participants: emptyParticipants() }))
+      return
+    }
+    const ids = new Set<number>()
+    sessions.filter(s => s.categorie === val).forEach(s => s.beneficiaireIds.forEach(id => ids.add(id)))
+    const apprenantes = [...ids]
       .map(bid => beneficiaires.find(b => b.id === bid))
       .filter((b): b is BenefSlim => Boolean(b))
       .map(b => ({ id: b.id, prenom: b.prenom, nom: b.nom }))
-    // Bénévoles/formatrices : pas (encore) rattaché aux ateliers côté Sheets — on garde la saisie
-    // manuelle déjà en place plutôt que d'écraser ce que la personne a déjà renseigné.
-    setForm(f => ({ ...f, sessionId: id, participants: { apprenantes, benevoles: f.participants?.benevoles ?? [], formatrices: f.participants?.formatrices ?? [] } }))
+    const intervenantesIds = new Set<string>()
+    sessions.filter(s => s.categorie === val).forEach(s => (s.intervenantIds ?? []).forEach(id => intervenantesIds.add(id)))
+    const formatrices = [...intervenantesIds]
+      .map(id => intervenants.find(i => i.ID_Intervenant === id))
+      .filter(Boolean)
+      .map(i => `${i!.Prenom} ${i!.Nom}`)
+    setForm(f => ({
+      ...f,
+      categorieAtelier: val,
+      sessionId: null,
+      participants: { apprenantes, benevoles: f.participants?.benevoles ?? [], formatrices },
+    }))
   }
+
+  const categoriesAtelier = useMemo(
+    () => [...new Set(sessions.map(s => s.categorie).filter(Boolean))].sort(),
+    [sessions]
+  )
 
   function removeApprenante(index: number) {
     setForm(f => ({ ...f, participants: { ...f.participants!, apprenantes: f.participants!.apprenantes.filter((_, i) => i !== index) } }))
@@ -935,6 +1008,23 @@ export default function CommunicationPage() {
             </Field>
           </FormRow>
 
+          {form.categorie === "atelier" && (
+            <Field label="Catégorie d'atelier">
+              <Select value={form.categorieAtelier ?? ""} onChange={e => handleCategorieAtelierChange(e.target.value)}>
+                <option value="">— Sélectionner une catégorie pour importer les participants —</option>
+                {categoriesAtelier.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </Select>
+              {sessions.length === 0 && (
+                <p className="text-[11px] text-muted mt-1">Aucune session trouvée — créez des ateliers dans le module Ateliers.</p>
+              )}
+              {form.categorieAtelier && (
+                <p className="text-[11px] text-muted mt-1">
+                  {sessions.filter(s => s.categorie === form.categorieAtelier).length} atelier(s) · {(form.participants?.apprenantes ?? []).length} participant(s) importé(s)
+                </p>
+              )}
+            </Field>
+          )}
+
           <Field label="Titre" required hint="ex. Recap atelier HTML/CSS">
             <Input value={form.titre} onChange={e => setForm(f => ({ ...f, titre: e.target.value }))} />
           </Field>
@@ -971,38 +1061,65 @@ export default function CommunicationPage() {
             <Textarea rows={5} aria-labelledby="contenu-principal-label" aria-describedby="contenu-principal-hint" value={form.contenu ?? ""} onChange={e => setForm(f => ({ ...f, contenu: e.target.value }))} />
           </div>
 
-          <Field label="Images / Vidéos">
-            <div className="space-y-2">
-              <p className="text-[11px] text-muted">Une image et/ou une vidéo par post (un nouvel ajout remplace le précédent du même type).</p>
-              {(form.media ?? []).length > 0 && (
-                <div className="flex gap-2 flex-wrap">
-                  {(form.media ?? []).map((m, i) => (
-                    <div key={i} className="relative group">
-                      {m.type === "image" && (m.preview ?? m.url)
+          <Field label="Commentaire interne" hint="Note interne (non publiée)">
+            <Textarea rows={2} value={form.commentaire ?? ""} onChange={e => setForm(f => ({ ...f, commentaire: e.target.value }))} />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Images">
+              <div className="space-y-2">
+                {(form.media ?? []).filter(m => m.type === "image").map((m, i) => {
+                  const realIndex = (form.media ?? []).indexOf(m)
+                  return (
+                    <div key={i} className="relative group inline-block">
+                      {(m.preview ?? m.url)
                         ? <img src={m.preview ?? m.url} alt={m.nom} width={64} height={64} loading="lazy" className="h-16 w-16 rounded-lg object-cover border border-border" />
-                        : <div className="h-16 w-16 rounded-lg border border-border bg-slate-100 flex items-center justify-center text-[10px] text-muted text-center p-1 leading-tight">{m.type === "video" ? "🎬 Vidéo" : m.nom}</div>
+                        : <div className="h-16 w-16 rounded-lg border border-border bg-slate-100 flex items-center justify-center text-[10px] text-muted text-center p-1 leading-tight">{m.nom}</div>
                       }
                       {m.uploading && (
                         <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
                           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         </div>
                       )}
-                      <button type="button" onClick={() => removeMedia(i)} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button type="button" onClick={() => removeMedia(realIndex)} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <X size={9} />
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
-              <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={e => { handleMediaFiles(e.target.files); e.target.value = "" }} />
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center gap-2 text-xs font-medium text-muted border border-dashed border-border rounded-xl px-4 py-3 w-full hover:border-slate-400 hover:text-foreground transition-colors">
-                <Plus size={13} /> Ajouter des images ou vidéos
-              </button>
-              {mediaError && (
-                <p className="text-[11px] text-alert bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{mediaError}</p>
-              )}
-            </div>
-          </Field>
+                  )
+                })}
+                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { handleMediaFiles(e.target.files); e.target.value = "" }} />
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center gap-2 text-xs font-medium text-muted border border-dashed border-border rounded-xl px-3 py-2.5 w-full hover:border-slate-400 hover:text-foreground transition-colors">
+                  <Plus size={13} /> Ajouter une image
+                </button>
+              </div>
+            </Field>
+
+            <Field label="Vidéo (lien de stockage)">
+              <div className="space-y-2">
+                <Input
+                  value={videoUrl}
+                  onChange={e => {
+                    const url = e.target.value
+                    setVideoUrl(url)
+                    setForm(f => {
+                      const withoutVideo = (f.media ?? []).filter(m => m.type !== "video")
+                      return { ...f, media: url.trim() ? [...withoutVideo, { nom: "Vidéo", type: "video", url }] : withoutVideo }
+                    })
+                  }}
+                  placeholder="https://drive.google.com/…"
+                />
+                {videoUrl && (
+                  <button type="button" onClick={() => { setVideoUrl(""); setForm(f => ({ ...f, media: (f.media ?? []).filter(m => m.type !== "video") })) }}
+                    className="flex items-center gap-1 text-[11px] text-alert hover:underline">
+                    <X size={10} /> Retirer la vidéo
+                  </button>
+                )}
+              </div>
+            </Field>
+          </div>
+          {mediaError && (
+            <p className="text-[11px] text-alert bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{mediaError}</p>
+          )}
 
           <Field label="Plateformes">
             <div className="flex gap-2">
@@ -1056,20 +1173,6 @@ export default function CommunicationPage() {
               <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                 <Users size={14} /> Participants à l&apos;atelier
               </p>
-
-              <Field label="Session associée (optionnel)">
-                <Select value={form.sessionId ?? ""} onChange={e => handleSessionChange(e.target.value)}>
-                  <option value="">— Sélectionner une session pour importer les participants —</option>
-                  {sessions.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {new Date(s.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })} — {s.titre}
-                    </option>
-                  ))}
-                </Select>
-                {sessions.length === 0 && (
-                  <p className="text-[11px] text-muted mt-1">Aucune session trouvée — créez des ateliers dans le module Ateliers.</p>
-                )}
-              </Field>
 
               <Field label="Apprenantes">
                 <div className="space-y-2">
@@ -1250,7 +1353,7 @@ export default function CommunicationPage() {
         ))}
       </div>
 
-      {tab === "calendrier" && <CalendrierTab posts={posts} onNewPost={openNewWithDate} />}
+      {tab === "calendrier" && <CalendrierTab posts={posts} onNewPost={openNewWithDate} onEdit={openEdit} />}
       {tab === "kanban"     && <KanbanTab posts={posts} rejectedIds={rejectedIds} onChangeStatus={changeStatus} onEdit={openEdit} />}
       </>
       )}
