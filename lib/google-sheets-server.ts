@@ -29,6 +29,9 @@ function getDriveClient() {
 
 export const POSITIONNEMENT_FOLDER_ID = "1VkfMr7hECZqKeSZhM7eIAbzCQ745yUUZ"
 
+// Dossier Drive "Communication - Médias" pour les images/vidéos des posts (module CONTENUS)
+export const COMMUNICATION_MEDIA_FOLDER_ID = "1yIGzxLSsdKmdc9N8Zdhkdiz10xdZdKY0"
+
 /** Rend un fichier Drive accessible publiquement (lecture) et retourne son URL de téléchargement direct. */
 export async function makeFilePublic(fileId: string): Promise<string> {
   const drive = getDriveClient()
@@ -104,14 +107,36 @@ export async function ensureColumn(
   sheetName: string,
   columnName: string
 ): Promise<void> {
+  return ensureColumns(sheets, sheetName, [columnName])
+}
+
+/** Ajoute plusieurs colonnes (en-têtes) manquantes en un seul appel (1 lecture + au plus 1 écriture). */
+export async function ensureColumns(
+  sheets: Sheets,
+  sheetName: string,
+  columnNames: string[]
+): Promise<void> {
   const headers = await getHeaders(sheets, sheetName)
-  if (headers.includes(columnName)) return
+  const missing = columnNames.filter((c) => !headers.includes(c))
+  if (!missing.length) return
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${sheetName}!${colLetter(headers.length + 1)}1`,
     valueInputOption: "RAW",
-    requestBody: { values: [[columnName]] },
+    requestBody: { values: [missing] },
   })
+}
+
+/** Sérialise une valeur pour une écriture USER_ENTERED : Sheets interprète normalement
+ *  une chaîne comme un nombre ("150" → 150), ce qui est voulu pour les montants. Mais
+ *  ça fait sauter les zéros initiaux d'un numéro de téléphone ("0612345678" → 612345678).
+ *  On force donc le texte (préfixe apostrophe, convention Sheets) uniquement pour les
+ *  chaînes qui commencent par un zéro suivi d'un chiffre — les montants ne matchent pas
+ *  ce motif, ils restent donc de vrais nombres dans la feuille. */
+function formatCellValue(value: unknown): string {
+  if (value === undefined || value === null) return ""
+  const str = String(value)
+  return /^0\d/.test(str) ? `'${str}` : str
 }
 
 export async function appendRow(
@@ -120,15 +145,13 @@ export async function appendRow(
   obj: Record<string, unknown>
 ): Promise<void> {
   const headers = await getHeaders(sheets, sheetName)
-  const row = headers.map((h) => (obj[h] !== undefined ? String(obj[h]) : ""))
+  const row = headers.map((h) => formatCellValue(obj[h]))
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
     range: sheetName,
     valueInputOption: "USER_ENTERED",
     // Sans ce flag, le mode par défaut ("OVERWRITE") peut mal détecter la fin
-    // du tableau sur certaines feuilles et écraser la dernière ligne écrite
-    // au lieu d'en ajouter une nouvelle (observé sur ASSIDUITE : deux appends
-    // successifs ciblaient la même ligne).
+    // du tableau et écraser la dernière ligne (observé sur ASSIDUITE).
     insertDataOption: "INSERT_ROWS",
     requestBody: { values: [row] },
   })
@@ -159,7 +182,7 @@ export async function updateRowById(
         spreadsheetId: SPREADSHEET_ID,
         range: rangeA1,
         valueInputOption: "USER_ENTERED",
-        requestBody: { values: [[val ?? ""]] },
+        requestBody: { values: [[formatCellValue(val)]] },
       })
     })
     .filter(Boolean)
