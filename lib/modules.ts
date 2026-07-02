@@ -11,7 +11,7 @@
 // ──────────────────────────────────────────────────────────────
 
 export type ModuleKey =
-  | "emargement" | "assiduite" | "finances" | "ateliers"
+  | "emargement" | "assiduite" | "ateliers"
   | "familles" | "positionnement" | "notes" | "communication"
 
 export interface ModuleDef {
@@ -23,7 +23,6 @@ export interface ModuleDef {
 export const MODULES: ModuleDef[] = [
   { key: "emargement",     label: "Émargement",             href: "/emargement" },
   { key: "assiduite",      label: "Assiduité",              href: "/assiduite" },
-  { key: "finances",       label: "Finances",               href: "/finances" },
   { key: "ateliers",       label: "Ateliers",               href: "/ateliers" },
   { key: "familles",       label: "Familles",               href: "/familles" },
   { key: "positionnement", label: "Test de positionnement", href: "/positionnement" },
@@ -36,7 +35,6 @@ export const ALL_MODULE_KEYS: ModuleKey[] = MODULES.map((m) => m.key)
 // Modèles rapides pré-cochés dans le formulaire (modifiables ensuite).
 export const MODULE_PRESETS: { label: string; keys: ModuleKey[] }[] = [
   { label: "Accès complet",      keys: [...ALL_MODULE_KEYS] },
-  { label: "Finances seulement", keys: ["finances"] },
   { label: "Formation",          keys: ["emargement", "assiduite", "ateliers"] },
 ]
 

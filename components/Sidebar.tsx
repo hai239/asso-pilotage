@@ -5,7 +5,6 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
-  Euro,
   BookOpen,
   Megaphone,
   ClipboardCheck,
@@ -25,7 +24,6 @@ const navItems = [
   { href: "/dashboard",     label: "Vue d'ensemble", icon: LayoutDashboard, accent: "bg-slate-100 text-slate-700",                   dot: "bg-slate-500" },
   { href: "/emargement",    label: "Émargement",      icon: ClipboardCheck,  accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
   { href: "/assiduite",     label: "Assiduité",        icon: BarChart2,        accent: "bg-absences-light text-absences-dark",            dot: "bg-absences" },
-  { href: "/finances",      label: "Finances",        icon: Euro,            accent: "bg-finances-light text-finances-dark",           dot: "bg-finances" },
   { href: "/veille-subventions", label: "Veille subventions", icon: Search,     accent: "bg-subventions-light text-subventions-dark",     dot: "bg-subventions" },
   { href: "/ateliers",       label: "Ateliers",        icon: BookOpen,        accent: "bg-ateliers-light text-ateliers-dark",           dot: "bg-ateliers" },
   { href: "/familles",      label: "Familles",         icon: UserCheck,       accent: "bg-familles-light text-familles-dark",           dot: "bg-familles" },

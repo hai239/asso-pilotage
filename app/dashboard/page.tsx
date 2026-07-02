@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Heart, LogOut, UserCircle,
-  UserCheck, BarChart2, ClipboardCheck, Euro, BookOpen, Megaphone, UserCog, GraduationCap, StickyNote,
+  UserCheck, BarChart2, ClipboardCheck, BookOpen, Megaphone, UserCog, GraduationCap, StickyNote,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { moduleForPath } from "@/lib/modules"
@@ -28,7 +28,6 @@ const modules: ModuleCard[] = [
   { href: "/familles",      label: "Familles",      sub: "Bénéficiaires, paiements, docs", icon: UserCheck,      accent: "bg-familles-light",      iconClass: "text-familles-dark" },
   { href: "/assiduite",     label: "Assiduité",     sub: "Présences, décrochage",          icon: BarChart2,      accent: "bg-absences-light",     iconClass: "text-absences-dark" },
   { href: "/emargement",    label: "Émargement",    sub: "Présences par séance",           icon: ClipboardCheck, accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
-  { href: "/finances",      label: "Finances",      sub: "Financements, inscriptions",     icon: Euro,           accent: "bg-finances-light",     iconClass: "text-finances-dark" },
   { href: "/ateliers",      label: "Ateliers",      sub: "Planning, groupes",              icon: BookOpen,       accent: "bg-ateliers-light",     iconClass: "text-ateliers-dark" },
   { href: "/positionnement", label: "Positionnement", sub: "Génération de tests",          icon: GraduationCap,  accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },
   { href: "/notes",         label: "Notes",         sub: "Saisie des évaluations",         icon: StickyNote,     accent: "bg-positionnement-light", iconClass: "text-positionnement-dark" },

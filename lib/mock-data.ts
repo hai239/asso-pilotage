@@ -13,23 +13,6 @@ export const absences = {
   ],
 }
 
-export const finances = {
-  stats: { enCours: 2, montantTotal: 17000, deadlineCetteSemaine: 1, tauxRemplissage: 68 },
-  demandes: [
-    { id: 1, type: "Subvention", org: "Mairie de Paris", montant: 5000, statut: "en cours", priorite: "haute", deadline: "2026-05-30", responsable: "Nadia", notes: "Dossier complet envoyé le 3 mai" },
-    { id: 2, type: "Subvention", org: "Région Île-de-France", montant: 12000, statut: "à compléter", priorite: "haute", deadline: "2026-05-28", responsable: "Nadia", notes: "Manque rapport d'activité 2025" },
-    { id: 3, type: "Mécénat", org: "Fondation Orange", montant: 3000, statut: "accepté", priorite: "normale", deadline: "2026-04-15", responsable: "Nadia", notes: "Versement prévu en juin" },
-    { id: 4, type: "Subvention", org: "CAF Paris", montant: 8000, statut: "rejeté", priorite: "normale", deadline: "2026-03-01", responsable: "Nadia", notes: "Hors critères d'éligibilité" },
-  ],
-  inscriptions: [
-    { id: 1, nom: "Leila A.", montant: 50, statut: "payé", date: "2026-05-02" },
-    { id: 2, nom: "Mariam D.", montant: 50, statut: "en attente", date: "2026-05-10" },
-    { id: 3, nom: "Noura S.", montant: 50, statut: "en retard", date: "2026-04-20" },
-    { id: 4, nom: "Hana T.", montant: 50, statut: "payé", date: "2026-05-05" },
-    { id: 5, nom: "Ines C.", montant: 50, statut: "en retard", date: "2026-04-15" },
-  ],
-}
-
 export const ateliers = {
   // Sessions d'ateliers — depuis le Lot 2 chaque atelier porte une fiche descriptive
   // étendue (compétences ciblées, public, organisation). Cf. lib/atelier.ts.
