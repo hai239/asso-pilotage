@@ -508,22 +508,34 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             const ouvert = openDocTypes.includes(cat)
             return (
               <li key={cat}>
-                {/* Ligne du type : cliquable (dépliage) uniquement s'il y a des fichiers */}
-                <div
-                  role={present ? "button" : undefined}
-                  onClick={present ? () => setOpenDocTypes(o => o.includes(cat) ? o.filter(c => c !== cat) : [...o, cat]) : undefined}
-                  className={`flex items-center justify-between gap-3 py-2.5 ${present ? "cursor-pointer" : ""}`}
-                >
-                  <span className="flex items-center gap-1.5 text-sm text-foreground">
-                    {present
-                      ? <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${ouvert ? "" : "-rotate-90"}`} />
-                      : <span className="w-[15px] shrink-0" />}
-                    {cat}
-                  </span>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${present ? "bg-finances-light text-finances-dark" : "bg-slate-100 text-slate-500"}`}>
-                    {present ? "Oui" : "Non"}
-                  </span>
-                </div>
+                {/* Ligne du type : bouton dépliable (accessible clavier) s'il y a des fichiers, sinon simple ligne */}
+                {(() => {
+                  const contenu = (
+                    <>
+                      <span className="flex items-center gap-1.5 text-sm text-foreground">
+                        {present
+                          ? <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${ouvert ? "" : "-rotate-90"}`} />
+                          : <span className="w-[15px] shrink-0" />}
+                        {cat}
+                      </span>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${present ? "bg-finances-light text-finances-dark" : "bg-slate-100 text-slate-500"}`}>
+                        {present ? "Oui" : "Non"}
+                      </span>
+                    </>
+                  )
+                  return present ? (
+                    <button
+                      type="button"
+                      aria-expanded={ouvert}
+                      onClick={() => setOpenDocTypes(o => o.includes(cat) ? o.filter(c => c !== cat) : [...o, cat])}
+                      className="w-full flex items-center justify-between gap-3 py-2.5 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-familles"
+                    >
+                      {contenu}
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3 py-2.5">{contenu}</div>
+                  )
+                })()}
 
                 {/* Fichiers rattachés à ce type (dépliés) */}
                 {present && ouvert && (
