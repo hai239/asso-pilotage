@@ -30,9 +30,26 @@ interface BeneficiaireSheet {
 interface AssiduiteSheet {
   ID_Assiduite: string
   ID_Evenement: string
+  ID_Seance: string
   ID_Personne: string
   Statut: string
   Notes: string
+}
+interface SeanceSheet {
+  ID_Seance: string
+  ID_Atelier: string
+  Date: string
+  Creneau: string
+  Heure_Debut: string
+  Heure_Fin: string
+  Salle: string
+  Statut: string
+}
+
+const CRENEAU_LABELS: Record<string, string> = {
+  "matin": "Matin",
+  "apres-midi": "Après-midi",
+  "journee": "Journée entière",
 }
 
 function normStatut(v: string): PresenceStatus {
@@ -44,6 +61,13 @@ function normStatut(v: string): PresenceStatus {
 }
 
 const S_SELECTED = "asso-emargement-session"
+const S_SELECTED_SEANCE = "asso-emargement-seance"
+
+/** Convertit "16/02/2026" (format Sheet) en "2026-02-16" pour un tri chronologique correct. */
+function frToIsoSort(d: string): string {
+  const m = (d ?? "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (d ?? "")
+}
 
 export default function EmargementPage() {
   const [ateliers, setAteliers] = useState<AtelierSheet[]>([])
@@ -51,6 +75,12 @@ export default function EmargementPage() {
   const [selectedId, setSelectedId] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [erreur, setErreur] = useState<string | null>(null)
+
+  // ── Séances de l'atelier sélectionné (table SEANCE) ──
+  // "" = pas de séance précise choisie → émargement au niveau de l'atelier entier
+  // (rétrocompatible avec les ateliers qui n'ont pas encore de séances définies).
+  const [seances, setSeances] = useState<SeanceSheet[]>([])
+  const [selectedSeanceId, setSelectedSeanceId] = useState<string>("")
 
   // État courant de la feuille d'émargement de l'atelier sélectionné :
   // { personneId → { statut, commentaire } }
@@ -79,10 +109,26 @@ export default function EmargementPage() {
     .map(id => beneficiaires.find(b => b.ID_Personne === id))
     .filter((b): b is BeneficiaireSheet => Boolean(b))
 
-  // ── Chargement de la feuille d'émargement quand l'atelier change ──
-  const loadRows = useCallback((atelierId: string, roster: BeneficiaireSheet[]) => {
+  // ── Chargement des séances quand l'atelier change ──
+  useEffect(() => {
+    if (!selectedId) { setSeances([]); setSelectedSeanceId(""); return }
+    fetch(`/api/sheets?action=getSeances&idAtelier=${selectedId}`)
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: SeanceSheet[]) => {
+        const sorted = [...rows].sort((a, b) => frToIsoSort(a.Date).localeCompare(frToIsoSort(b.Date)))
+        setSeances(sorted)
+        const preSelected = localStorage.getItem(S_SELECTED_SEANCE) ?? ""
+        setSelectedSeanceId(sorted.some(s => s.ID_Seance === preSelected) ? preSelected : "")
+      })
+      .catch(() => { setSeances([]); setSelectedSeanceId("") })
+  }, [selectedId])
+
+  // ── Chargement de la feuille d'émargement quand l'atelier ou la séance change ──
+  const loadRows = useCallback((atelierId: string, seanceId: string, roster: BeneficiaireSheet[]) => {
     if (!atelierId) { setRows({}); return }
-    fetch(`/api/sheets?action=getAssiduite&idEvenement=${atelierId}`)
+    const params = new URLSearchParams({ action: "getAssiduite", idEvenement: atelierId })
+    if (seanceId) params.set("idSeance", seanceId)
+    fetch(`/api/sheets?${params.toString()}`)
       .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((records: AssiduiteSheet[]) => {
         const byPersonne: Record<string, { statut: PresenceStatus; commentaire: string }> = {}
@@ -96,10 +142,10 @@ export default function EmargementPage() {
   }, [])
 
   useEffect(() => {
-    if (selectedId) loadRows(selectedId, roster)
+    if (selectedId) loadRows(selectedId, selectedSeanceId, roster)
     // roster dépend de `ateliers`/`beneficiaires`, déjà stables une fois chargés.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, ateliers, beneficiaires])
+  }, [selectedId, selectedSeanceId, ateliers, beneficiaires])
 
   async function persist(personneId: string, statut: PresenceStatus, commentaire: string) {
     setSavingId(personneId)
@@ -110,6 +156,7 @@ export default function EmargementPage() {
         body: JSON.stringify({
           action: "upsertAssiduite",
           idEvenement: selectedId,
+          idSeance: selectedSeanceId || undefined,
           idPersonne: personneId,
           statut,
           notes: commentaire,
@@ -182,6 +229,29 @@ export default function EmargementPage() {
           <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
         </div>
       </div>
+
+      {/* Sélecteur de séance — seulement si l'atelier a des séances définies */}
+      {seances.length > 0 && (
+        <div className="mb-6">
+          <label className="text-xs font-semibold text-muted uppercase tracking-wider block mb-2">Séance</label>
+          <div className="relative w-full max-w-md">
+            <select
+              value={selectedSeanceId}
+              onChange={e => { setSelectedSeanceId(e.target.value); localStorage.setItem(S_SELECTED_SEANCE, e.target.value) }}
+              className="w-full appearance-none bg-surface border border-border rounded-xl px-4 py-3 pr-10 text-sm font-medium text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-ateliers"
+            >
+              <option value="">Toutes les séances (atelier entier)</option>
+              {seances.map(s => (
+                <option key={s.ID_Seance} value={s.ID_Seance}>
+                  {s.Date}{s.Creneau && ` · ${CRENEAU_LABELS[s.Creneau] ?? s.Creneau}`}
+                  {s.Heure_Debut && ` · ${s.Heure_Debut}${s.Heure_Fin ? `–${s.Heure_Fin}` : ""}`}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-center text-sm text-muted py-12">Chargement des ateliers depuis Google Sheets…</p>

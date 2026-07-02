@@ -227,6 +227,45 @@ export async function deleteRowById(
   return true
 }
 
+// Onglets déjà confirmés existants dans ce process — évite de refaire un
+// spreadsheets.get (metadata complète) à chaque appel une fois le sheet créé.
+const ensuredSheets = new Set<string>()
+
+/** Crée un nouvel onglet avec ses en-têtes s'il n'existe pas déjà (idempotent,
+ *  n'écrase jamais un onglet existant). Sert de base pour les nouvelles entités
+ *  qui n'ont pas encore de table dans le Sheet (ex : SEANCE). */
+export async function ensureSheet(
+  sheets: Sheets,
+  sheetName: string,
+  headers: string[]
+): Promise<void> {
+  if (ensuredSheets.has(sheetName)) return
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID })
+  if (meta.data.sheets?.some((s) => s.properties?.title === sheetName)) {
+    ensuredSheets.add(sheetName)
+    return
+  }
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
+    })
+  } catch (e) {
+    // Deux requêtes concurrentes peuvent toutes deux constater l'absence de
+    // l'onglet et tenter de le créer ; l'API Sheets rejette la seconde
+    // création ("A sheet with the name ... already exists") — dans ce cas
+    // l'onglet existe bel et bien, on continue normalement.
+    if (!String(e).includes("already exists")) throw e
+  }
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [headers] },
+  })
+  ensuredSheets.add(sheetName)
+}
+
 export async function nextId(sheets: Sheets, sheetName: string): Promise<number> {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
