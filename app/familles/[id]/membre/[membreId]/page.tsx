@@ -417,12 +417,6 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             <Upload size={15} />
             Ajouter un document
           </button>
-          <button
-            onClick={() => { setForm({ ...membre }); setSlideOpen(true) }}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-familles-light text-familles-dark text-sm font-medium hover:bg-familles hover:text-white transition-colors"
-          >
-            Modifier
-          </button>
         </div>
       </div>
 
@@ -455,7 +449,21 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
 
       {/* Carte infos */}
       <div className="bg-surface border border-border rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-semibold text-foreground mb-3">Informations personnelles</h2>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h2 className="text-sm font-semibold text-foreground">Informations personnelles</h2>
+          <button
+            onClick={() => { setForm({
+              Nom: membre.Nom, Prenom: membre.Prenom, Genre: membre.Genre,
+              Date_Naissance: membre.Date_Naissance, Telephone: membre.Telephone,
+              WhatsApp: membre.WhatsApp, Email: membre.Email,
+              Pays_Origine: membre.Pays_Origine, Langue_Maternelle: membre.Langue_Maternelle,
+              Contact_Principal: membre.Contact_Principal, Source_Orientation: membre.Source_Orientation,
+            }); setSlideOpen(true) }}
+            className="flex items-center gap-1.5 text-xs text-familles-dark hover:underline shrink-0"
+          >
+            <Pencil size={13} /> Modifier
+          </button>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
           {champsInfos.map(c => (
             <InfoRow key={c.label} label={c.label} value={c.value} />
@@ -917,7 +925,7 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
         </form>
       </SlideOver>
 
-      {/* SlideOver modification */}
+      {/* SlideOver modification — informations personnelles uniquement */}
       <SlideOver
         open={slideOpen}
         onClose={() => setSlideOpen(false)}
@@ -925,26 +933,35 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
         width="md"
       >
         <form onSubmit={e => { e.preventDefault(); handleSave() }} className="flex flex-col gap-4">
-          <Field label="Rôle">
-            <Select value={String(form.Role ?? "")} onChange={e => setForm(f => ({ ...f, Role: e.target.value }))}>
-              <option value="Adulte">Adulte</option>
-              <option value="Enfant">Enfant</option>
-            </Select>
-          </Field>
           <FormRow>
-            <Field label="Prénom" required>
-              <Input value={String(form.Prenom ?? "")} onChange={e => setForm(f => ({ ...f, Prenom: e.target.value }))} />
-            </Field>
             <Field label="Nom">
               <Input value={String(form.Nom ?? "")} onChange={e => setForm(f => ({ ...f, Nom: e.target.value }))} />
             </Field>
+            <Field label="Prénom" required>
+              <Input value={String(form.Prenom ?? "")} onChange={e => setForm(f => ({ ...f, Prenom: e.target.value }))} />
+            </Field>
           </FormRow>
-          <Field label="Téléphone">
-            <Input value={String(form.Telephone ?? "")} onChange={e => setForm(f => ({ ...f, Telephone: e.target.value }))} />
-          </Field>
-          <Field label="Email">
-            <Input type="email" value={String(form.Email ?? "")} onChange={e => setForm(f => ({ ...f, Email: e.target.value }))} />
-          </Field>
+          <FormRow>
+            <Field label="Genre">
+              <Select value={String(form.Genre ?? "")} onChange={e => setForm(f => ({ ...f, Genre: e.target.value }))}>
+                <option value="">— Choisir —</option>
+                <option value="H">H</option>
+                <option value="F">F</option>
+                <option value="N/A">N/A</option>
+              </Select>
+            </Field>
+            <Field label="Date de naissance">
+              <DateInput value={form.Date_Naissance != null ? String(form.Date_Naissance) : ""} onChange={v => setForm(f => ({ ...f, Date_Naissance: v }))} />
+            </Field>
+          </FormRow>
+          <FormRow>
+            <Field label="Téléphone">
+              <Input value={String(form.Telephone ?? "")} onChange={e => setForm(f => ({ ...f, Telephone: e.target.value }))} />
+            </Field>
+            <Field label="Email">
+              <Input type="email" value={String(form.Email ?? "")} onChange={e => setForm(f => ({ ...f, Email: e.target.value }))} />
+            </Field>
+          </FormRow>
           <Field label="WhatsApp">
             <Input value={String(form.WhatsApp ?? "")} onChange={e => setForm(f => ({ ...f, WhatsApp: e.target.value }))} />
           </Field>
@@ -956,35 +973,18 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <Input value={String(form.Langue_Maternelle ?? "")} onChange={e => setForm(f => ({ ...f, Langue_Maternelle: e.target.value }))} />
             </Field>
           </FormRow>
-          <Field label="Date de naissance">
-            <DateInput value={form.Date_Naissance != null ? String(form.Date_Naissance) : ""} onChange={v => setForm(f => ({ ...f, Date_Naissance: v }))} />
-          </Field>
           <FormRow>
-            <Field label="Niveau / Classe">
-              <Select value={String(form.Niveau ?? "")} onChange={e => setForm(f => ({ ...f, Niveau: e.target.value }))}>
-                <option value="">—</option>
-                <ExtraOption value={String(form.Niveau ?? "")} list={NIVEAUX} />
-                <option value="CM1">CM1</option>
-                <option value="CE2">CE2</option>
-                <option value="6eme">6ème</option>
-                <option value="5eme">5ème</option>
-                <option value="4eme">4ème</option>
-                <option value="2nde">2nde</option>
-                <option value="Terminale CAP">Terminale CAP</option>
+            <Field label="Contact principal">
+              <Select value={String(form.Contact_Principal ?? "")} onChange={e => setForm(f => ({ ...f, Contact_Principal: e.target.value }))}>
+                <option value="">— Choisir —</option>
+                <option value="Oui">Oui</option>
+                <option value="Non">Non</option>
               </Select>
             </Field>
-            <Field label="Statut">
-              <Select value={String(form.Statut_Inscription ?? "")} onChange={e => setForm(f => ({ ...f, Statut_Inscription: e.target.value }))}>
-                <option value="">—</option>
-                <option value="EN COURS">EN COURS</option>
-                <option value="SUSPENDU">SUSPENDU</option>
-                <option value="ARRÊTÉ">ARRÊTÉ</option>
-              </Select>
+            <Field label="Source d'orientation">
+              <Input value={String(form.Source_Orientation ?? "")} onChange={e => setForm(f => ({ ...f, Source_Orientation: e.target.value }))} />
             </Field>
           </FormRow>
-          <Field label="Date d'inscription">
-            <DateInput value={form.Date_Inscription != null ? String(form.Date_Inscription) : ""} onChange={v => setForm(f => ({ ...f, Date_Inscription: v }))} />
-          </Field>
           <SaveButton accent="familles" />
           <DeleteButton onClick={handleDelete} />
         </form>

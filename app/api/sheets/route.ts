@@ -912,9 +912,31 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
   if (data.Charte !== undefined)           pmap["Charte d'engagement"] = data.Charte
   if (data.Beneficiaire !== undefined)     pmap["Beneficiaire"] = data.Beneficiaire
   if (data.Notes !== undefined)            pmap["Commentaire"] = data.Notes
+  // WhatsApp : colonne créée à la volée si absente de PERSONNE
+  if (data.WhatsApp !== undefined) {
+    await ensureColumn(sheets, "PERSONNE", "WhatsApp")
+    pmap["WhatsApp"] = data.WhatsApp
+  }
 
   const updated = await updateRowById(sheets, "PERSONNE", idMembre, pmap)
   if (!updated) return { error: "Personne introuvable" }
+
+  // Unicité du contact principal : un seul « Oui » par famille.
+  if (String(data.Contact_Principal ?? "").toLowerCase() === "oui") {
+    const personnes = await sheetToObjects(sheets, "PERSONNE")
+    const self = personnes.find((p) => String(p["ID"]) === String(idMembre))
+    const famId = self ? String(self["Famille ID"]) : ""
+    if (famId) {
+      const autres = personnes.filter((p) =>
+        String(p["Famille ID"]) === famId &&
+        String(p["ID"]) !== String(idMembre) &&
+        String(p["Contact principal"] ?? "").toLowerCase() === "oui"
+      )
+      for (const p of autres) {
+        await updateRowById(sheets, "PERSONNE", String(p["ID"]), { "Contact principal": "Non" })
+      }
+    }
+  }
 
   if (
     data.Statut_Inscription !== undefined ||
@@ -1662,7 +1684,7 @@ function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unkn
     Pays_Origine: p["Pays d'origine"],
     Telephone: p["Telephone"],
     Email: p["Email"],
-    WhatsApp: "",
+    WhatsApp: p["WhatsApp"] ?? "",
     Droit_Image: p[COL_DROIT_IMAGE],
     Charte: p["Charte d'engagement"],
     Beneficiaire: p["Beneficiaire"],
