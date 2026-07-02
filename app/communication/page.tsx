@@ -241,7 +241,7 @@ function PostPreviewCard({ platform, contenu, tags, media }: {
 // Calendrier éditorial
 // ──────────────────────────────────────────────
 function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: string) => void }) {
-  const today = new Date("2026-05-20")
+  const today = new Date()
   const [displayYear, setDisplayYear] = useState(today.getFullYear())
   const [displayMonth, setDisplayMonth] = useState(today.getMonth())
 
@@ -282,6 +282,18 @@ function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: 
     })
     return map
   }, [posts, year, month])
+
+  const PLATEFORMES: Plateforme[] = ["LinkedIn", "Instagram", "Facebook"]
+
+  const platformCounts = useMemo(() => {
+    const counts: Partial<Record<Plateforme, number>> = {}
+    Object.values(postsByDay).flat().forEach((p) => {
+      p.plateforme.forEach((pl) => {
+        counts[pl] = (counts[pl] ?? 0) + 1
+      })
+    })
+    return counts
+  }, [postsByDay])
 
   const statutDot: Record<ValidationStatus, string> = {
     brouillon:     "bg-slate-300",
@@ -325,6 +337,16 @@ function CalendrierTab({ posts, onNewPost }: { posts: Post[]; onNewPost: (date: 
             <span key={s} className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${c}`} />{s}</span>
           ))}
         </div>
+      </div>
+      <div className="flex items-center gap-2 py-1">
+        {PLATEFORMES.filter((pl) => (platformCounts[pl] ?? 0) > 0).map((pl) => (
+          <span key={pl} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${plateformeStyle[pl]}`}>
+            <PlatIcon p={pl} /> {platformCounts[pl]}
+          </span>
+        ))}
+        {Object.keys(platformCounts).length === 0 && (
+          <span className="text-xs text-muted italic">Aucun post ce mois-ci</span>
+        )}
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted mb-1">
         {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => <div key={d}>{d}</div>)}
