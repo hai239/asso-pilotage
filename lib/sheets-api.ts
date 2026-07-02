@@ -181,6 +181,8 @@ export interface ScolariteEntry {
   ID_Membre: string
   Nom: string
   Prenom: string
+  Etablissement_ID: string
+  Prof_ID: string
   Etablissement: { Type: string; Nom: string } | null
   ProfPrincipal: { Nom: string; Telephone: string; Email: string } | null
   Autorisation_Sortie: string
@@ -340,8 +342,8 @@ export async function addProfesseur(data: { Nom: string; Telephone: string; Emai
   return apiPost({ action: "addProfesseur", data }) as Promise<{ ok: boolean; ID: string }>
 }
 
-export async function addScolarite(idMembre: string, idEtab: string, idProf: string): Promise<{ ok: boolean }> {
-  return apiPost({ action: "addScolarite", idMembre, idEtab, idProf }) as Promise<{ ok: boolean }>
+export async function addScolarite(idMembre: string, idEtab: string, idProf: string, rencontre?: string): Promise<{ ok: boolean }> {
+  return apiPost({ action: "addScolarite", idMembre, idEtab, idProf, rencontre }) as Promise<{ ok: boolean }>
 }
 
 // ── Indicateur de configuration ────────────────

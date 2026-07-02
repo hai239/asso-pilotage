@@ -494,6 +494,8 @@ async function getScolariteFamille(sheets: Sheets, idFamille: string) {
         ID_Membre: String(sc["Personne ID"]),
         Nom: String(p?.["Nom"] ?? ""),
         Prenom: String(p?.["Prenom"] ?? ""),
+        Etablissement_ID: String(sc["Etablissement ID"] ?? ""),
+        Prof_ID: String(sc["Prof principal ID"] ?? ""),
         Etablissement: etab ? { Type: String(etab["Type"] ?? ""), Nom: String(etab["Nom"] ?? "") } : null,
         ProfPrincipal: prof
           ? { Nom: String(prof["Nom"] ?? ""), Telephone: String(prof["Telephone"] ?? ""), Email: String(prof["Email"] ?? "") }
@@ -1477,16 +1479,15 @@ async function addScolariteEntry(sheets: Sheets, body: Record<string, unknown>) 
   const idMembre = String(body.idMembre ?? "")
   const scolarites = await sheetToObjects(sheets, "SCOLARITE")
   const existing = scolarites.find(s => String(s["Personne ID"]) === idMembre)
+  const champs: Record<string, unknown> = {
+    "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+  }
+  if (body.rencontre !== undefined) champs["Rencontre prof"] = body.rencontre
   if (existing) {
-    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), {
-      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
-    })
+    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), champs)
   } else {
     const id = await nextId(sheets, "SCOLARITE")
-    await appendRow(sheets, "SCOLARITE", {
-      "ID": id, "Personne ID": idMembre,
-      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
-    })
+    await appendRow(sheets, "SCOLARITE", { "ID": id, "Personne ID": idMembre, ...champs })
   }
   return { ok: true }
 }
