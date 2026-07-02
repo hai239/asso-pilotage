@@ -35,6 +35,7 @@ import {
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
 } from "@/components/SlideOver"
+import Pagination, { usePagination } from "@/components/Pagination"
 import BrouillonGroupesTab from "./brouillon-tab"
 
 // ──────────────────────────────────────────────
@@ -644,7 +645,7 @@ const statutSessionStyle: Record<SessionStatut, string> = {
   "planifié":  "bg-ateliers-light text-ateliers-dark",
   "en cours":  "bg-absences-light text-absences-dark",
   "terminé":   "bg-finances-light text-finances-dark",
-  "annulé":    "bg-slate-100 text-slate-500",
+  "annulé":    "bg-slate-100 text-slate-600",
 }
 
 const niveauStyle: Record<NiveauBenef, string> = {
@@ -1098,6 +1099,9 @@ function AteliersTab({
   const upcoming = sorted.filter(s => s.statut !== "terminé" && s.statut !== "annulé")
   const past     = sorted.filter(s => s.statut === "terminé" || s.statut === "annulé")
 
+  const upcomingPagination = usePagination(upcoming, "asso-ateliers-upcoming-page-size")
+  const pastPagination     = usePagination(past, "asso-ateliers-past-page-size")
+
   const filtreActif = q !== "" || filterBenevole !== "tous" || filterDate !== "tous"
   function resetFiltres() {
     setSearch(""); setFilterBenevole("tous"); setFilterDate("tous")
@@ -1295,6 +1299,7 @@ function AteliersTab({
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
+            aria-label="Rechercher un atelier"
             placeholder="Rechercher un atelier (titre, description…)"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -1353,8 +1358,19 @@ function AteliersTab({
             <h2 className="font-semibold text-foreground text-sm">À venir</h2>
           </div>
           <ul className="divide-y divide-border">
-            {upcoming.map(s => <SessionCard key={s.id} s={s} />)}
+            {upcomingPagination.pageItems.map(s => <SessionCard key={s.id} s={s} />)}
           </ul>
+          <div className="px-5 pb-4">
+            <Pagination
+              page={upcomingPagination.page}
+              totalPages={upcomingPagination.totalPages}
+              total={upcomingPagination.total}
+              pageSize={upcomingPagination.pageSize}
+              onPageChange={upcomingPagination.setPage}
+              onPageSizeChange={upcomingPagination.changePageSize}
+              accentClass="focus:ring-2 focus:ring-ateliers/30"
+            />
+          </div>
         </section>
       )}
       {past.length > 0 && (
@@ -1363,8 +1379,19 @@ function AteliersTab({
             <h2 className="font-semibold text-muted text-sm">Passés</h2>
           </div>
           <ul className="divide-y divide-border">
-            {past.map(s => <SessionCard key={s.id} s={s} />)}
+            {pastPagination.pageItems.map(s => <SessionCard key={s.id} s={s} />)}
           </ul>
+          <div className="px-5 pb-4">
+            <Pagination
+              page={pastPagination.page}
+              totalPages={pastPagination.totalPages}
+              total={pastPagination.total}
+              pageSize={pastPagination.pageSize}
+              onPageChange={pastPagination.setPage}
+              onPageSizeChange={pastPagination.changePageSize}
+              accentClass="focus:ring-2 focus:ring-ateliers/30"
+            />
+          </div>
         </section>
       )}
       {sessions.length === 0 && (
@@ -1432,6 +1459,7 @@ function GroupesTab({
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
+            aria-label="Rechercher un type, un groupe ou un bénéficiaire"
             placeholder="Rechercher un type, un groupe ou un bénéficiaire…"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -1635,7 +1663,7 @@ function IntervenantsTab({
                 </div>
               </div>
               <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
-                iv.Statut === "inactif" ? "bg-slate-100 text-slate-500" : "bg-green-50 text-green-700"
+                iv.Statut === "inactif" ? "bg-slate-100 text-slate-600" : "bg-green-50 text-green-700"
               }`}>
                 {iv.Statut || "actif"}
               </span>

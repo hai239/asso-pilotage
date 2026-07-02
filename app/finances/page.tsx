@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { finances as financesMock } from "@/lib/mock-data"
 import SlideOver, { Field, Input, Textarea, Select, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
+import Pagination, { usePagination } from "@/components/Pagination"
 import { Plus, Pencil, AlertTriangle } from "lucide-react"
 
 type DemandeStatut = "en cours" | "à compléter" | "accepté" | "rejeté"
@@ -113,6 +114,9 @@ export default function FinancesPage() {
     return diff >= 0 && diff <= 7
   }).length
 
+  const demandesPagination     = usePagination(demandes, "asso-finances-demandes-page-size")
+  const inscriptionsPagination = usePagination(inscriptions, "asso-finances-inscriptions-page-size")
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <header className="mb-8">
@@ -172,7 +176,7 @@ export default function FinancesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {demandes.map((d) => (
+              {demandesPagination.pageItems.map((d) => (
                 <tr key={d.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3">
                     <p className="font-medium text-foreground">{d.org || "—"}</p>
@@ -198,6 +202,19 @@ export default function FinancesPage() {
             </tbody>
           </table>
         )}
+        {demandes.length > 0 && (
+          <div className="px-5 pb-4">
+            <Pagination
+              page={demandesPagination.page}
+              totalPages={demandesPagination.totalPages}
+              total={demandesPagination.total}
+              pageSize={demandesPagination.pageSize}
+              onPageChange={demandesPagination.setPage}
+              onPageSizeChange={demandesPagination.changePageSize}
+              accentClass="focus:ring-2 focus:ring-finances/30"
+            />
+          </div>
+        )}
       </section>
 
       {/* Inscriptions */}
@@ -215,7 +232,7 @@ export default function FinancesPage() {
           <p className="text-center text-sm text-muted py-8 italic">Aucune inscription</p>
         ) : (
           <ul className="divide-y divide-border">
-            {inscriptions.map((i) => (
+            {inscriptionsPagination.pageItems.map((i) => (
               <li key={i.id} className="px-5 py-3 flex items-center justify-between text-sm">
                 <span className="font-medium text-foreground">{i.nom || "—"}</span>
                 <div className="flex items-center gap-4">
@@ -229,6 +246,19 @@ export default function FinancesPage() {
               </li>
             ))}
           </ul>
+        )}
+        {inscriptions.length > 0 && (
+          <div className="px-5 pb-4">
+            <Pagination
+              page={inscriptionsPagination.page}
+              totalPages={inscriptionsPagination.totalPages}
+              total={inscriptionsPagination.total}
+              pageSize={inscriptionsPagination.pageSize}
+              onPageChange={inscriptionsPagination.setPage}
+              onPageSizeChange={inscriptionsPagination.changePageSize}
+              accentClass="focus:ring-2 focus:ring-finances/30"
+            />
+          </div>
         )}
       </section>
 

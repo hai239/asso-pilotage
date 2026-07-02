@@ -39,6 +39,8 @@ export async function GET(request: NextRequest) {
         return ok(await getFamilles(sheets))
       case "getMembres":
         return ok(await getMembres(sheets, searchParams.get("idFamille") ?? undefined))
+      case "getScolariteFamille":
+        return ok(await getScolariteFamille(sheets, searchParams.get("idFamille")!))
       case "getMembre":
         return ok(await getMembre(sheets, searchParams.get("idMembre")!))
       case "getPaiements":
@@ -136,6 +138,36 @@ const DOSSIERS_DOCUMENT: Record<string, string> = {
   "Droit à l'image":        "1vD-Q6oTVf6HrWBQIAd6Q7CSFm0zJIoAt",
   "Charte d'engagement":    "1H7FcDHQSkf9q3DW71FVBonjwxll4yXsz",
   "Autorisation de sortie": "14f-X5DRlA-z7GorJMUxlBq1KlXDGTFSi",
+  "Bulletins":              "1gFIzCwk33OaHlFSJjluKDs3iU9onyAQ2",
+}
+
+// Catégorie de document → colonne « Oui/Non » à synchroniser dans la base.
+// (Fiche d'inscription : pas de colonne dédiée, l'info reste dérivée de DOCUMENTS JOINTS.)
+const DOC_FLAG: Record<string, { table: "PERSONNE" | "SCOLARITE"; column: string }> = {
+  "Droit à l'image":        { table: "PERSONNE",  column: "Droit a l'image" },
+  "Charte d'engagement":    { table: "PERSONNE",  column: "Charte d'engagement" },
+  "Autorisation de sortie": { table: "SCOLARITE", column: "Autorisation de sortie" },
+  "Bulletins":              { table: "SCOLARITE", column: "Bulletins" },
+}
+
+// Met la colonne liée à une catégorie de document à « Oui »/« Non ».
+// Pour SCOLARITE, crée la ligne de la personne si elle n'existe pas encore.
+async function syncDocFlag(sheets: Sheets, idMembre: string, categorie: string, present: boolean) {
+  const map = DOC_FLAG[categorie]
+  if (!map || !idMembre) return
+  const val = present ? "Oui" : "Non"
+  if (map.table === "PERSONNE") {
+    await updateRowById(sheets, "PERSONNE", idMembre, { [map.column]: val })
+    return
+  }
+  const scol = await sheetToObjects(sheets, "SCOLARITE")
+  const row = scol.find((s) => String(s["Personne ID"]) === String(idMembre))
+  if (row) {
+    await updateRowById(sheets, "SCOLARITE", String(row["ID"]), { [map.column]: val })
+  } else {
+    const id = await nextId(sheets, "SCOLARITE")
+    await appendRow(sheets, "SCOLARITE", { "ID": id, "Personne ID": idMembre, [map.column]: val })
+  }
 }
 
 async function uploadFichier(sheets: Sheets, body: Record<string, unknown>) {
@@ -189,6 +221,9 @@ async function uploadFichier(sheets: Sheets, body: Record<string, unknown>) {
     requestBody: { values: [row] },
   })
 
+  // 3) Synchronise la colonne « Oui/Non » correspondante (Droit à l'image, Charte, Bulletins…)
+  await syncDocFlag(sheets, idMembre, categorie, true)
+
   return { ok: true, url, fileId, ID: id, nomFichier }
 }
 
@@ -203,11 +238,23 @@ async function deleteDocument(sheets: Sheets, idDoc: string) {
   // Best-effort : tenter de supprimer le fichier Drive associé
   const docs = await sheetToObjects(sheets, "DOCUMENTS JOINTS")
   const d = docs.find((x) => String(x["ID"]) === String(idDoc))
+  const idMembre = d ? String(d["ID PERSONNE"] ?? "") : ""
+  const categorie = d ? String(d["Catégorie"] ?? "") : ""
   if (d) {
     const m = /\/file\/d\/([^/]+)/.exec(String(d["URL"] ?? ""))
     if (m) { try { await deleteDriveFile(m[1]) } catch { /* le compte de service ne peut pas toujours supprimer */ } }
   }
   const supprime = await deleteRowById(sheets, "DOCUMENTS JOINTS", String(idDoc))
+
+  // Repasse la colonne à « Non » s'il ne reste plus aucun document de cette catégorie
+  if (supprime && idMembre && DOC_FLAG[categorie]) {
+    const resteUnDoc = docs.some((x) =>
+      String(x["ID"]) !== String(idDoc) &&
+      String(x["ID PERSONNE"]) === idMembre &&
+      String(x["Catégorie"]) === categorie
+    )
+    await syncDocFlag(sheets, idMembre, categorie, resteUnDoc)
+  }
   return supprime ? { ok: true } : { error: "Document introuvable" }
 }
 
@@ -395,6 +442,42 @@ async function getMembres(sheets: Sheets, idFamille?: string) {
   const membres = personnes.map((p) => mapMembre(p, inscriptions))
   if (idFamille) return membres.filter((m) => m.ID_Famille === String(idFamille))
   return membres
+}
+
+// Scolarité des membres d'une famille (jointure SCOLARITE → ETABLISSEMENT + PROFESSEUR).
+// Ne renvoie que les personnes de la famille ayant une ligne SCOLARITE (typiquement les enfants).
+async function getScolariteFamille(sheets: Sheets, idFamille: string) {
+  const [personnes, scolarites, etabs, profs] = await Promise.all([
+    sheetToObjects(sheets, "PERSONNE"),
+    sheetToObjects(sheets, "SCOLARITE"),
+    sheetToObjects(sheets, "ETABLISSEMENT"),
+    sheetToObjects(sheets, "PROFESSEUR"),
+  ])
+  const etabById = new Map(etabs.map((e) => [String(e["ID"]), e]))
+  const profById = new Map(profs.map((p) => [String(p["ID"]), p]))
+  const persById = new Map(personnes.map((p) => [String(p["ID"]), p]))
+  const idsFamille = new Set(
+    personnes.filter((p) => String(p["Famille ID"]) === String(idFamille)).map((p) => String(p["ID"]))
+  )
+  return scolarites
+    .filter((sc) => idsFamille.has(String(sc["Personne ID"])))
+    .map((sc) => {
+      const p = persById.get(String(sc["Personne ID"]))
+      const etab = etabById.get(String(sc["Etablissement ID"]))
+      const prof = profById.get(String(sc["Prof principal ID"]))
+      return {
+        ID_Membre: String(sc["Personne ID"]),
+        Nom: String(p?.["Nom"] ?? ""),
+        Prenom: String(p?.["Prenom"] ?? ""),
+        Etablissement: etab ? { Type: String(etab["Type"] ?? ""), Nom: String(etab["Nom"] ?? "") } : null,
+        ProfPrincipal: prof
+          ? { Nom: String(prof["Nom"] ?? ""), Telephone: String(prof["Telephone"] ?? ""), Email: String(prof["Email"] ?? "") }
+          : null,
+        Autorisation_Sortie: String(sc["Autorisation de sortie"] ?? ""),
+        Bulletins: String(sc["Bulletins"] ?? ""),
+        Rencontre_Prof: String(sc["Rencontre prof"] ?? ""),
+      }
+    })
 }
 
 async function getMembre(sheets: Sheets, idMembre: string) {
@@ -1034,12 +1117,15 @@ async function upsertAssiduite(
   await ensureColumn(sheets, "ASSIDUITE", "Seance ID")
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
   // Avec idSeance : une ligne par (séance, personne). Sans idSeance (ancien
-  // comportement, émargement au niveau atelier entier) : une ligne par (atelier, personne).
+  // comportement, émargement au niveau atelier entier) : une ligne par (atelier, personne),
+  // en excluant explicitement les lignes déjà rattachées à une séance précise —
+  // sinon un émargement "toutes les séances" retrouve et écrase par erreur la
+  // ligne d'une séance spécifique (même Evenement2 ID que l'atelier parent).
   const existing = rows.find((r) =>
     String(r["Personne ID"]) === String(idPersonne) &&
     (idSeance
       ? String(r["Seance ID"] ?? "") === String(idSeance)
-      : String(r["Evenement2 ID"]) === String(idEvenement))
+      : String(r["Evenement2 ID"]) === String(idEvenement) && !String(r["Seance ID"] ?? ""))
   )
 
   if (existing) {

@@ -233,28 +233,6 @@ export async function deleteRowById(
   return true
 }
 
-/** Crée un nouvel onglet avec ses en-têtes s'il n'existe pas déjà (idempotent,
- *  n'écrase jamais un onglet existant). Sert de base pour les nouvelles entités
- *  qui n'ont pas encore de table dans le Sheet (ex : SEANCE). */
-export async function ensureSheet(
-  sheets: Sheets,
-  sheetName: string,
-  headers: string[]
-): Promise<void> {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID })
-  if (meta.data.sheets?.some((s) => s.properties?.title === sheetName)) return
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
-  })
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A1`,
-    valueInputOption: "RAW",
-    requestBody: { values: [headers] },
-  })
-}
-
 export async function nextId(sheets: Sheets, sheetName: string): Promise<number> {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,

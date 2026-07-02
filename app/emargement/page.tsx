@@ -57,6 +57,12 @@ function normStatut(v: string): PresenceStatus {
 const S_SELECTED = "asso-emargement-session"
 const S_SELECTED_SEANCE = "asso-emargement-seance"
 
+/** Convertit "16/02/2026" (format Sheet) en "2026-02-16" pour un tri chronologique correct. */
+function frToIsoSort(d: string): string {
+  const m = (d ?? "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (d ?? "")
+}
+
 export default function EmargementPage() {
   const [ateliers, setAteliers] = useState<AtelierSheet[]>([])
   const [beneficiaires, setBeneficiaires] = useState<BeneficiaireSheet[]>([])
@@ -103,7 +109,7 @@ export default function EmargementPage() {
     fetch(`/api/sheets?action=getSeances&idAtelier=${selectedId}`)
       .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((rows: SeanceSheet[]) => {
-        const sorted = [...rows].sort((a, b) => a.Date.localeCompare(b.Date))
+        const sorted = [...rows].sort((a, b) => frToIsoSort(a.Date).localeCompare(frToIsoSort(b.Date)))
         setSeances(sorted)
         const preSelected = localStorage.getItem(S_SELECTED_SEANCE) ?? ""
         setSelectedSeanceId(sorted.some(s => s.ID_Seance === preSelected) ? preSelected : "")
@@ -199,9 +205,10 @@ export default function EmargementPage() {
 
       {/* Sélecteur d'atelier */}
       <div className="mb-6">
-        <label className="text-xs font-semibold text-muted uppercase tracking-wider block mb-2">Atelier</label>
+        <label htmlFor="emargement-atelier" className="text-xs font-semibold text-muted uppercase tracking-wider block mb-2">Atelier</label>
         <div className="relative w-full max-w-md">
           <select
+            id="emargement-atelier"
             value={selectedId}
             onChange={e => { setSelectedId(e.target.value); localStorage.setItem(S_SELECTED, e.target.value) }}
             className="w-full appearance-none bg-surface border border-border rounded-xl px-4 py-3 pr-10 text-sm font-medium text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-ateliers"

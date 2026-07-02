@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { StickyNote, Search, GraduationCap, UserCheck, Sparkles, X } from "lucide-react"
 import { NIVEAUX_CECRL } from "@/lib/positionnement"
+import Pagination, { usePagination } from "@/components/Pagination"
 
 // ──────────────────────────────────────────────
 // Types
@@ -184,6 +185,8 @@ export default function NotesPage() {
     return f && f.idEvaluation !== null
   }).length
 
+  const { pageItems: pagedFiltres, page, setPage, pageSize, changePageSize, total, totalPages } = usePagination(filtres, "asso-notes-page-size")
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <header className="mb-6">
@@ -285,7 +288,7 @@ export default function NotesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtres.map(b => {
+              {pagedFiltres.map(b => {
                 const form = getForm(b.id)
                 const busy = savingId === b.id
                 const Icon = b.type === "parent" ? UserCheck : GraduationCap
@@ -363,6 +366,9 @@ export default function NotesPage() {
               })}
             </tbody>
           </table>
+          <div className="px-4 pb-4">
+            <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={changePageSize} accentClass="focus:ring-2 focus:ring-positionnement/30" />
+          </div>
         </div>
       )}
 
