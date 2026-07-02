@@ -90,13 +90,7 @@ Coche les thématiques du test de positionnement que cet atelier va travailler.
   - 6-9 ans
   - 10-13 ans
   - 14-18 ans
-- **Taille de groupe cible** : nombre visé par groupe (ex 8 ou 10).
-- **Ratio encadrement** : optionnel. Si tu mets "2", l'app affichera
-  "4 encadrants requis par groupe de 8" pour t'alerter sur les besoins
-  en bénévoles.
-- **Mélanger les niveaux** : décoché par défaut (groupes homogènes
-  = rythme pédagogique adapté). Coché = groupes hétérogènes
-  (mélange volontaire pour entraide entre pairs).
+- **Taille de groupe cible** (facultatif) : nombre visé par groupe (ex 8 ou 10).
 
 ### Organisation
 
@@ -116,9 +110,8 @@ côté de "Ateliers" et "Groupes").
 
 Sur cet écran, pour chaque atelier :
 
-- Les **groupes proposés** sont affichés en cartes. Chaque carte indique :
-  - le nom (auto-généré : *{atelier} · {tranche} · Groupe N*)
-  - le nombre d'**encadrants requis** si l'atelier impose un ratio
+- Les **groupes proposés** sont affichés en cartes, avec le nom auto-généré
+  (*{atelier} · {tranche} · Groupe N*).
 - Les bénéficiaires **non placés** sont affichés à part dans deux zones :
   - **À évaluer avant attribution** (orange) — pas de notes initiales
   - **Hors tranche d'âge** (gris) — âge en dehors de la plage de l'atelier
@@ -131,7 +124,7 @@ glissant à la souris. Le brouillon est sauvegardé à chaque mouvement.
 Tu peux aussi **régénérer** avec d'autres paramètres :
 
 1. Clique sur le bouton "Régénérer" en haut à droite du brouillon.
-2. Modifie la taille de groupe et/ou coche "Mélanger les niveaux".
+2. Modifie la taille de groupe.
 3. Valide — le brouillon est remplacé.
 
 > 💡 Tu peux régénérer autant de fois que tu veux jusqu'à être satisfaite.

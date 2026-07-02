@@ -14,7 +14,6 @@ import {
 import {
   emptyFiche,
   migrateFiche,
-  encadrantsRequis,
   niveauEcole,
   COULEURS_ATELIER,
   type FicheAtelier,
@@ -29,7 +28,7 @@ import Link from "next/link"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
-  X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
+  X, Columns3, Check, Sparkles, Shuffle,
   ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock,
 } from "lucide-react"
 import SlideOver, {
@@ -37,6 +36,7 @@ import SlideOver, {
 } from "@/components/SlideOver"
 import Pagination, { usePagination } from "@/components/Pagination"
 import BrouillonGroupesTab from "./brouillon-tab"
+import { useFermerAuClicExterieur } from "@/lib/use-fermer-au-clic-exterieur"
 
 // ──────────────────────────────────────────────
 // Types
@@ -132,7 +132,6 @@ interface AtelierSheet {
   Salle: string
   Mode_Groupage: string
   Taille_Cible: string
-  Ratio_Encadrement: string
   Competences_Ciblees: string[]
   Taches: string
   Besoins: string
@@ -173,8 +172,6 @@ function atelierFromSheet(a: AtelierSheet): Session {
     ageMin: null,
     ageMax: null,
     tailleGroupeCible: a.Taille_Cible ? Number(a.Taille_Cible) : null,
-    ratioEncadrement: a.Ratio_Encadrement ? Number(a.Ratio_Encadrement) : null,
-    mixerNiveaux: false,
     modeGroupage: a.Mode_Groupage === "disponibilite" ? "disponibilite" : "notes",
     taches: toLines(a.Taches),
     besoins: toLines(a.Besoins),
@@ -347,13 +344,15 @@ const DEFAULT_TYPES: Record<Audience, string[]> = {
 }
 const S_TYPES = (a: Audience) => `asso-atelier-types-${a}`
 
-/** Sélecteur de type d'atelier avec gestion (ajout / suppression) de la liste. */
+/** Sélecteur de type d'atelier — un seul champ déroulant pour choisir, créer et
+ *  supprimer un type (plus de lien « Gérer les types » séparé). */
 function CategorieField({
   audience, value, onChange,
 }: { audience: Audience; value: string; onChange: (v: string) => void }) {
   const [types, setTypes] = useState<string[]>(DEFAULT_TYPES[audience])
-  const [manage, setManage] = useState(false)
+  const [open, setOpen] = useState(false)
   const [newType, setNewType] = useState("")
+  const ref = useFermerAuClicExterieur<HTMLDivElement>(open, () => setOpen(false))
 
   useEffect(() => {
     setTypes(load<string[]>(S_TYPES(audience), DEFAULT_TYPES[audience]))
@@ -362,6 +361,10 @@ function CategorieField({
   function persistTypes(t: string[]) {
     setTypes(t)
     localStorage.setItem(S_TYPES(audience), JSON.stringify(t))
+  }
+  function selectType(t: string) {
+    onChange(t)
+    setOpen(false)
   }
   function addType() {
     const v = newType.trim()
@@ -377,33 +380,50 @@ function CategorieField({
   const options = value && !types.includes(value) ? [value, ...types] : types
 
   return (
-    <div>
-      <div className="flex items-center gap-2">
-        <Select value={value} onChange={e => onChange(e.target.value)}>
-          <option value="">— Choisir un type —</option>
-          {options.map(t => <option key={t} value={t}>{t}</option>)}
-        </Select>
-        <button
-          type="button"
-          onClick={() => setManage(m => !m)}
-          className="text-xs text-muted hover:text-foreground whitespace-nowrap underline"
-        >
-          Gérer les types
-        </button>
-      </div>
-      {manage && (
-        <div className="mt-2 rounded-lg border border-border bg-surface p-2">
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {types.map(t => (
-              <span key={t} className="text-[11px] bg-slate-100 rounded-full pl-2.5 pr-1 py-0.5 flex items-center gap-1">
-                {t}
-                <button type="button" onClick={() => removeType(t)} className="text-muted hover:text-red-600" aria-label={`Supprimer ${t}`}>
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
+    <div ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg border border-border bg-surface hover:border-ateliers transition-colors"
+      >
+        <span className={value ? "text-foreground" : "text-muted"}>{value || "— Choisir un type —"}</span>
+        <ChevronDown size={14} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-2 rounded-xl border border-border bg-surface shadow-sm">
+          <div className="max-h-48 overflow-y-auto py-1">
+            {options.length === 0 ? (
+              <p className="text-[11px] text-muted italic text-center py-4">Aucun type.</p>
+            ) : options.map(t => {
+              const selected = t === value
+              return (
+                <div key={t} className={`flex items-center gap-1 pr-1.5 ${selected ? "bg-ateliers-light/40" : ""}`}>
+                  <button
+                    type="button"
+                    onClick={() => selectType(t)}
+                    className="flex-1 flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 text-left"
+                  >
+                    <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                      selected ? "bg-ateliers border-ateliers" : "border-border bg-surface"
+                    }`}>
+                      {selected && <Check size={10} className="text-white" />}
+                    </span>
+                    {t}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeType(t)}
+                    className="text-muted hover:text-red-600 shrink-0 p-1"
+                    aria-label={`Supprimer ${t}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )
+            })}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 p-2 border-t border-border">
             <input
               type="text"
               value={newType}
@@ -762,7 +782,6 @@ function AudienceHubCards({
   const hubs: Array<{
     id: Audience
     label: string
-    sublabel: string
     Icon: typeof GraduationCap
     bgActive: string
     borderInactive: string
@@ -773,8 +792,7 @@ function AudienceHubCards({
   }> = [
     {
       id: "eleves",
-      label: "Ateliers enfants",
-      sublabel: "Élèves mineurs",
+      label: "Ateliers élèves",
       Icon: GraduationCap,
       bgActive: "bg-ateliers",
       borderInactive: "border-ateliers/30",
@@ -785,8 +803,7 @@ function AudienceHubCards({
     },
     {
       id: "parents",
-      label: "Ateliers parents",
-      sublabel: "Parents / adultes",
+      label: "Ateliers adultes",
       Icon: UserCheck,
       bgActive: "bg-communication",
       borderInactive: "border-communication/30",
@@ -827,10 +844,7 @@ function AudienceHubCards({
                 <h.Icon size={24} className={active ? "text-white" : h.iconColor} />
               </span>
               <div className="flex-1 min-w-0">
-                <p className={`text-[11px] font-semibold uppercase tracking-wider ${active ? "opacity-90" : "opacity-70"}`}>
-                  {h.sublabel}
-                </p>
-                <p className="text-lg font-bold mt-0.5">{h.label}</p>
+                <p className="text-lg font-bold">{h.label}</p>
                 <p className={`text-sm mt-2 ${active ? "opacity-95" : "opacity-80"}`}>
                   <span className="font-semibold tabular-nums">{c.ateliers}</span> atelier{c.ateliers > 1 ? "s" : ""}
                   <span className="mx-1.5 opacity-50">·</span>
@@ -1835,7 +1849,6 @@ export default function AteliersPage() {
         // Parents & ateliers "classiques" → par notes ; théâtre/marionnettes → par disponibilité.
         Mode_Groupage: f.audience !== "parents" && parDispo ? "disponibilite" : "notes",
         Taille_Cible: f.tailleGroupeCible ?? "",
-        Ratio_Encadrement: f.ratioEncadrement ?? "",
         Competences_Ciblees: f.competencesCiblees,
         Taches: f.taches,
         Besoins: f.besoins,
@@ -2567,10 +2580,6 @@ export default function AteliersPage() {
             <p className="text-xs font-semibold text-ateliers-dark uppercase tracking-wider mb-2">
               Compétences travaillées
             </p>
-            <p className="text-[11px] text-muted mb-3">
-              Cochez les thématiques du test de positionnement qui seront travaillées.
-              Elles servent à proposer une composition de groupes adaptée.
-            </p>
             <div className="grid grid-cols-2 gap-2">
               {THEMATIQUES.map(t => {
                 const checked = sessionForm.competencesCiblees.includes(t.key)
@@ -2595,74 +2604,22 @@ export default function AteliersPage() {
                 )
               })}
             </div>
-            {sessionForm.competencesCiblees.length === 0 && (
-              <p className="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
-                <AlertTriangle size={11} /> Aucune compétence cochée — l&apos;auto-composition de groupes sera désactivée pour cet atelier.
-              </p>
-            )}
           </div>
 
-          {/* ── Paramètres de groupage ──
-              Pour les ateliers parents : ni notion d'âge, ni ratio d'encadrement. */}
+          {/* ── Paramètres de groupage ── */}
           <div className="rounded-xl border border-border bg-surface/50 p-3">
             <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">
               Paramètres de groupage
             </p>
-            <p className="text-[11px] text-muted mb-3">
-              Définissent comment l&apos;algorithme construira les groupes du brouillon.
-              {sessionForm.audience !== "parents" && " L'âge des bénéficiaires est géré automatiquement par tranches (6-9, 10-13, 14-18 ans)."}
-            </p>
-            {sessionForm.audience === "parents" ? (
-              <Field label="Taille de groupe cible" hint="ex. 10">
-                <Input
-                  type="number" min={2} max={30}
-                  value={sessionForm.tailleGroupeCible ?? ""}
-                  onChange={e => setSessionForm(f => ({
-                    ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
-                  }))}
-                />
-              </Field>
-            ) : (
-              <>
-                <FormRow>
-                  <Field label="Taille de groupe cible" hint="ex. 10">
-                    <Input
-                      type="number" min={2} max={30}
-                      value={sessionForm.tailleGroupeCible ?? ""}
-                      onChange={e => setSessionForm(f => ({
-                        ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
-                      }))}
-                    />
-                  </Field>
-                  <Field label="Ratio encadrement (1 pour N)" hint="Optionnel">
-                    <Input
-                      type="number" min={1} max={20}
-                      value={sessionForm.ratioEncadrement ?? ""}
-                      onChange={e => setSessionForm(f => ({
-                        ...f, ratioEncadrement: e.target.value === "" ? null : Number(e.target.value),
-                      }))}
-                    />
-                  </Field>
-                </FormRow>
-                {sessionForm.ratioEncadrement !== null && sessionForm.tailleGroupeCible !== null && (
-                  <p className="text-[11px] text-muted mt-1">
-                    → {encadrantsRequis(sessionForm.ratioEncadrement, sessionForm.tailleGroupeCible)} encadrant·es
-                    requis par groupe de {sessionForm.tailleGroupeCible}.
-                  </p>
-                )}
-              </>
-            )}
-            <label className="flex items-center gap-2 mt-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={sessionForm.mixerNiveaux}
-                onChange={e => setSessionForm(f => ({ ...f, mixerNiveaux: e.target.checked }))}
-                className="rounded border-border"
+            <Field label="Taille de groupe cible (facultatif)" hint="ex. 10">
+              <Input
+                type="number" min={2} max={30} placeholder="10"
+                value={sessionForm.tailleGroupeCible ?? ""}
+                onChange={e => setSessionForm(f => ({
+                  ...f, tailleGroupeCible: e.target.value === "" ? null : Number(e.target.value),
+                }))}
               />
-              <span className="text-xs text-foreground">
-                Mélanger les niveaux <span className="text-muted">(par défaut : groupes homogènes)</span>
-              </span>
-            </label>
+            </Field>
           </div>
 
           {/* ── Organisation ── */}

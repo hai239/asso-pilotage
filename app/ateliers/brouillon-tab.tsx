@@ -7,7 +7,7 @@ import {
   type Thematique,
   type TypeBeneficiaire,
 } from "@/lib/positionnement"
-import { encadrantsRequis, type FicheAtelier } from "@/lib/atelier"
+import type { FicheAtelier } from "@/lib/atelier"
 import {
   composerGroupes,
   saveBrouillon,
@@ -145,7 +145,6 @@ export default function BrouillonGroupesTab(props: {
   // SlideOver "régénérer avec paramètres"
   interface ParamForm {
     tailleGroupeCible: number
-    mixerNiveaux: boolean
     /** Pondération par thématique cochée sur l'atelier. */
     ponderation: Partial<Record<Thematique, Pondaration>>
     /** Seuils pour le filtre outliers. Vides = pas de filtre. */
@@ -155,7 +154,7 @@ export default function BrouillonGroupesTab(props: {
   const [paramSlide, setParamSlide] = useState(false)
   const [paramAtelier, setParamAtelier] = useState<Session | null>(null)
   const [paramForm, setParamForm] = useState<ParamForm>({
-    tailleGroupeCible: 10, mixerNiveaux: false,
+    tailleGroupeCible: 10,
     ponderation: {}, noteMin: "", noteMax: "",
   })
 
@@ -208,7 +207,6 @@ export default function BrouillonGroupesTab(props: {
     const courant = brouillons[atelier.id]
     setParamForm({
       tailleGroupeCible: courant?.parametres.tailleGroupeCible ?? atelier.tailleGroupeCible ?? 10,
-      mixerNiveaux:      courant?.parametres.mode === "hétérogène" ? true : atelier.mixerNiveaux,
       ponderation:       courant?.parametres.ponderation ?? {},
       noteMin:           courant?.parametres.noteMin != null ? String(courant.parametres.noteMin) : "",
       noteMax:           courant?.parametres.noteMax != null ? String(courant.parametres.noteMax) : "",
@@ -224,7 +222,6 @@ export default function BrouillonGroupesTab(props: {
       paramAtelier,
       {
         tailleGroupeCible: paramForm.tailleGroupeCible,
-        mixerNiveaux:      paramForm.mixerNiveaux,
       },
       {
         ponderation: paramForm.ponderation,
@@ -364,7 +361,7 @@ export default function BrouillonGroupesTab(props: {
     const nouveaux: Groupe[] = brouillon.groupes.map((g, i) => ({
       id: baseId + i,
       nom: g.nom,
-      type: brouillon.parametres.mode === "hétérogène" ? "mixte" : "niveau",
+      type: "niveau",
       description: `Auto-généré depuis "${atelier.titre}" — ${g.beneficiaireIds.length} bénéficiaires`,
       beneficiaireIds: [...g.beneficiaireIds],
       atelierId: atelier.id,
@@ -462,7 +459,6 @@ export default function BrouillonGroupesTab(props: {
           nom: atelier.titre,
           cycle: null,
           beneficiaireIds: atelier.beneficiaireIds,
-          encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, atelier.beneficiaireIds.length),
         } : null
 
         return (
@@ -493,11 +489,6 @@ export default function BrouillonGroupesTab(props: {
                   {atelier.tailleGroupeCible !== null && (
                     <span className="text-[10px] text-muted">· groupes de {atelier.tailleGroupeCible}</span>
                   )}
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                    atelier.mixerNiveaux ? "bg-communication-light text-communication-dark" : "bg-ateliers-light text-ateliers-dark"
-                  }`}>
-                    {atelier.mixerNiveaux ? "hétérogène" : "homogène"}
-                  </span>
                 </div>
               </div>
               {/* Actions */}
@@ -628,7 +619,6 @@ export default function BrouillonGroupesTab(props: {
                 <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-[11px] text-muted">
                   <span className={justRegen === atelier.id ? "text-ateliers-dark font-semibold" : ""}>
                     {justRegen === atelier.id ? "✨ Régénéré à l'instant" : `Généré le ${new Date(brouillon.generedAt).toLocaleString("fr-FR")}`}
-                    {" "}· Mode <b>{brouillon.parametres.mode}</b>
                   </span>
                   <button onClick={() => supprimerBrouillon(atelier.id)} className="hover:text-foreground hover:underline">
                     <RotateCcw size={10} className="inline mr-1" /> Abandonner ce brouillon
@@ -662,17 +652,6 @@ export default function BrouillonGroupesTab(props: {
               onChange={e => setParamForm(f => ({ ...f, tailleGroupeCible: Number(e.target.value) }))}
             />
           </Field>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={paramForm.mixerNiveaux}
-              onChange={e => setParamForm(f => ({ ...f, mixerNiveaux: e.target.checked }))}
-              className="rounded border-border"
-            />
-            <span className="text-sm text-foreground">
-              Mélanger les niveaux <span className="text-muted text-xs">(hétérogène)</span>
-            </span>
-          </label>
 
           {/* ── Pondération des thématiques ── */}
           {paramAtelier && paramAtelier.competencesCiblees.length >= 2 && (
@@ -748,8 +727,7 @@ export default function BrouillonGroupesTab(props: {
           </div>
 
           <p className="text-[11px] text-muted bg-slate-50 rounded-lg px-3 py-2">
-            💡 <b>Mode homogène</b> : les bénéficiaires aux notes proches sont regroupés (rythme pédagogique adapté).<br />
-            <b>Mode hétérogène</b> : les niveaux sont mélangés (entraide entre pairs).
+            💡 Les bénéficiaires aux notes proches sont regroupés (rythme pédagogique adapté).
           </p>
           <SaveButton accent="ateliers" />
         </form>
@@ -768,7 +746,6 @@ export default function BrouillonGroupesTab(props: {
               nom: atelier.titre,
               cycle: null,
               beneficiaireIds: atelier.beneficiaireIds,
-              encadrantsRequis: encadrantsRequis(atelier.ratioEncadrement, atelier.beneficiaireIds.length),
             } : undefined)
           : brouillon?.groupes.find(g => g.id === viewingGroupe?.groupeId)
         const benefsLibresPourAjout = isLive
@@ -967,11 +944,6 @@ function GroupeCard(props: {
           <p className="text-[10px] text-muted">{groupe.beneficiaireIds.length} bénéficiaire{groupe.beneficiaireIds.length > 1 ? "s" : ""}</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {groupe.encadrantsRequis !== null && (
-            <span className="text-[10px] bg-benevoles-light text-benevoles-dark px-1.5 py-0.5 rounded flex items-center gap-1">
-              <UserCheck size={9} /> {groupe.encadrantsRequis} encadrant·e{groupe.encadrantsRequis > 1 ? "s" : ""}
-            </span>
-          )}
           <button
             type="button"
             onClick={e => { e.stopPropagation(); onDelete() }}

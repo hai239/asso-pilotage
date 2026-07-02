@@ -137,7 +137,7 @@ Identité & planning :
 | id | titre | description | date | heure | duree | salle | formatrice | statut |
 
 Public ciblé & paramètres de composition :
-| ageMin | ageMax | tailleGroupeCible | ratioEncadrement | mixerNiveaux |
+| ageMin | ageMax | tailleGroupeCible |
 
 Période (champ texte libre, ex : "Vacances de printemps 2026") :
 | periode |
