@@ -36,6 +36,7 @@ import SlideOver, {
 } from "@/components/SlideOver"
 import Pagination, { usePagination } from "@/components/Pagination"
 import BrouillonGroupesTab from "./brouillon-tab"
+import { useFermerAuClicExterieur } from "@/lib/use-fermer-au-clic-exterieur"
 
 // ──────────────────────────────────────────────
 // Types
@@ -343,13 +344,15 @@ const DEFAULT_TYPES: Record<Audience, string[]> = {
 }
 const S_TYPES = (a: Audience) => `asso-atelier-types-${a}`
 
-/** Sélecteur de type d'atelier avec gestion (ajout / suppression) de la liste. */
+/** Sélecteur de type d'atelier — un seul champ déroulant pour choisir, créer et
+ *  supprimer un type (plus de lien « Gérer les types » séparé). */
 function CategorieField({
   audience, value, onChange,
 }: { audience: Audience; value: string; onChange: (v: string) => void }) {
   const [types, setTypes] = useState<string[]>(DEFAULT_TYPES[audience])
-  const [manage, setManage] = useState(false)
+  const [open, setOpen] = useState(false)
   const [newType, setNewType] = useState("")
+  const ref = useFermerAuClicExterieur<HTMLDivElement>(open, () => setOpen(false))
 
   useEffect(() => {
     setTypes(load<string[]>(S_TYPES(audience), DEFAULT_TYPES[audience]))
@@ -358,6 +361,10 @@ function CategorieField({
   function persistTypes(t: string[]) {
     setTypes(t)
     localStorage.setItem(S_TYPES(audience), JSON.stringify(t))
+  }
+  function selectType(t: string) {
+    onChange(t)
+    setOpen(false)
   }
   function addType() {
     const v = newType.trim()
@@ -373,33 +380,50 @@ function CategorieField({
   const options = value && !types.includes(value) ? [value, ...types] : types
 
   return (
-    <div>
-      <div className="flex items-center gap-2">
-        <Select value={value} onChange={e => onChange(e.target.value)}>
-          <option value="">— Choisir un type —</option>
-          {options.map(t => <option key={t} value={t}>{t}</option>)}
-        </Select>
-        <button
-          type="button"
-          onClick={() => setManage(m => !m)}
-          className="text-xs text-muted hover:text-foreground whitespace-nowrap underline"
-        >
-          Gérer les types
-        </button>
-      </div>
-      {manage && (
-        <div className="mt-2 rounded-lg border border-border bg-surface p-2">
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {types.map(t => (
-              <span key={t} className="text-[11px] bg-slate-100 rounded-full pl-2.5 pr-1 py-0.5 flex items-center gap-1">
-                {t}
-                <button type="button" onClick={() => removeType(t)} className="text-muted hover:text-red-600" aria-label={`Supprimer ${t}`}>
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
+    <div ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg border border-border bg-surface hover:border-ateliers transition-colors"
+      >
+        <span className={value ? "text-foreground" : "text-muted"}>{value || "— Choisir un type —"}</span>
+        <ChevronDown size={14} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-2 rounded-xl border border-border bg-surface shadow-sm">
+          <div className="max-h-48 overflow-y-auto py-1">
+            {options.length === 0 ? (
+              <p className="text-[11px] text-muted italic text-center py-4">Aucun type.</p>
+            ) : options.map(t => {
+              const selected = t === value
+              return (
+                <div key={t} className={`flex items-center gap-1 pr-1.5 ${selected ? "bg-ateliers-light/40" : ""}`}>
+                  <button
+                    type="button"
+                    onClick={() => selectType(t)}
+                    className="flex-1 flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 text-left"
+                  >
+                    <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                      selected ? "bg-ateliers border-ateliers" : "border-border bg-surface"
+                    }`}>
+                      {selected && <Check size={10} className="text-white" />}
+                    </span>
+                    {t}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeType(t)}
+                    className="text-muted hover:text-red-600 shrink-0 p-1"
+                    aria-label={`Supprimer ${t}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )
+            })}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 p-2 border-t border-border">
             <input
               type="text"
               value={newType}
