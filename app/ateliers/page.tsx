@@ -30,7 +30,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
-  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock,
+  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -184,10 +184,12 @@ function atelierFromSheet(a: AtelierSheet): Session {
 }
 
 // ──────────────────────────────────────────────
-// Séances — occurrences précises d'un atelier (table SEANCE du Sheet).
-// Un atelier (Session) reste le programme macro ; une Séance porte la date,
-// le créneau (matin/après-midi/journée), les horaires et les intervenants
-// propres à cette occurrence (ils peuvent différer d'une séance à l'autre).
+// Séances — occurrences précises d'un atelier (lignes EVENEMENT2, Type =
+// "Séance"). Un atelier (Session) reste le programme macro ; une Séance porte
+// un nom, une date, des horaires et des intervenants propres à cette
+// occurrence (ils peuvent différer d'une séance à l'autre). Le "créneau"
+// (matin/après-midi/journée) n'est qu'un raccourci de saisie côté formulaire :
+// il préremplit les horaires mais n'est pas persisté.
 // ──────────────────────────────────────────────
 type Creneau = "matin" | "apres-midi" | "journee"
 
@@ -201,8 +203,8 @@ const CRENEAUX: { key: Creneau; label: string; heureDebut: string; heureFin: str
 interface SeanceSheet {
   ID_Seance: string
   ID_Atelier: string
+  Nom: string
   Date: string
-  Creneau: string
   Heure_Debut: string
   Heure_Fin: string
   Salle: string
@@ -213,8 +215,8 @@ interface SeanceSheet {
 interface Seance {
   id: number
   atelierId: number
+  nom: string
   date: string // ISO, pour <input type="date">
-  creneau: Creneau | ""
   heureDebut: string // "HH:MM", pour <input type="time">
   heureFin: string
   salle: string
@@ -229,8 +231,8 @@ function seanceFromSheet(s: SeanceSheet): Seance {
   return {
     id: Number(s.ID_Seance),
     atelierId: Number(s.ID_Atelier),
+    nom: s.Nom || "",
     date: frToIso(s.Date),
-    creneau: (s.Creneau as Creneau) || "",
     heureDebut: s.Heure_Debut || "",
     heureFin: s.Heure_Fin || "",
     salle: s.Salle || "",
@@ -257,8 +259,8 @@ function dureeFromHeures(heureDebut: string, heureFin: string): string {
 
 const emptySeance = (): Omit<Seance, "id"> => ({
   atelierId: 0,
+  nom: "",
   date: new Date().toISOString().split("T")[0],
-  creneau: "",
   heureDebut: "",
   heureFin: "",
   salle: "",
@@ -912,10 +914,135 @@ const emptyIntervenantForm = (): IntervenantForm => ({
 })
 
 // ══════════════════════════════════════════════
+// ONGLET RÉCAP — bilan quantitatif des ateliers élèves
+// ══════════════════════════════════════════════
+interface RecapEleveRow {
+  atelier: string
+  dates: string
+  vacances: string
+  combienDeGroupe: number
+  combienDeSeances: number
+  dureeChaqueSeance: string
+  heuresParEleve: string
+  nElèves: number
+  elementaire6e: number
+  collegeLycee: number
+  nSalaries: number
+  hSalariees: number
+  nStagiaires: number
+  hStagiaires: number
+  nBenevoles: number
+  hBenevoles: number
+}
+
+const RECAP_COLONNES: { key: keyof RecapEleveRow; label: string }[] = [
+  { key: "atelier", label: "Atelier" },
+  { key: "dates", label: "Dates de l'atelier" },
+  { key: "vacances", label: "Vacances" },
+  { key: "combienDeGroupe", label: "Combien de groupes" },
+  { key: "combienDeSeances", label: "Combien de séances" },
+  { key: "dureeChaqueSeance", label: "Durée de chaque séance" },
+  { key: "heuresParEleve", label: "Heures par élève" },
+  { key: "nElèves", label: "N élèves" },
+  { key: "elementaire6e", label: "Élémentaires-6e" },
+  { key: "collegeLycee", label: "Collège-lycée" },
+  { key: "nSalaries", label: "N salariés impliqués" },
+  { key: "hSalariees", label: "N heures salariées" },
+  { key: "nStagiaires", label: "N stagiaires impliqués" },
+  { key: "hStagiaires", label: "N heures stagiaires" },
+  { key: "nBenevoles", label: "N bénévoles impliqués" },
+  { key: "hBenevoles", label: "N heures bénévoles" },
+]
+
+function RecapEleveTab() {
+  const [rows, setRows] = useState<RecapEleveRow[] | null>(null)
+  const [erreur, setErreur] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  function reload() {
+    setErreur(null)
+    fetch("/api/sheets?action=getRecapEleves")
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(data => setRows(data.rows))
+      .catch(() => setErreur("Impossible de calculer le récap depuis le Sheet."))
+  }
+  useEffect(reload, [])
+
+  async function handleExport() {
+    setExporting(true)
+    setMessage(null)
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "exportRecapEleves" }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      window.open(data.url, "_blank")
+      setMessage(`Export créé dans le dossier Bilan atelier : ${data.nomFichier}`)
+    } catch {
+      setMessage("Erreur : l'export CSV a échoué.")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-sm text-muted">
+          Bilan quantitatif par type d'atelier et période — calculé en direct depuis le Sheet.
+        </p>
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting || !rows?.length}
+          className="flex items-center gap-2 bg-ateliers-dark text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          <BarChart2 size={14} /> {exporting ? "Export en cours…" : "Exporter en CSV"}
+        </button>
+      </div>
+
+      {message && <p className="text-xs text-ateliers-dark bg-ateliers-light rounded-lg px-3 py-2">{message}</p>}
+
+      {erreur ? (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{erreur}</div>
+      ) : rows === null ? (
+        <p className="text-center text-sm text-muted py-12">Calcul du récap…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-center text-sm text-muted py-12">Aucun atelier élève à récapituler pour l'instant.</p>
+      ) : (
+        <div className="overflow-x-auto border border-border rounded-xl">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-border">
+                {RECAP_COLONNES.map(c => (
+                  <th key={c.key} className="text-left font-semibold text-muted px-3 py-2 whitespace-nowrap">{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} className="border-b border-border last:border-0 hover:bg-slate-50">
+                  {RECAP_COLONNES.map(c => (
+                    <td key={c.key} className="px-3 py-2 whitespace-nowrap text-foreground">{r[c.key] || "—"}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════
 // ONGLET ATELIERS
 // ══════════════════════════════════════════════
 function AteliersTab({
-  sessions, beneficiaires, benevoles, groupes, onEdit, onView, onDelete,
+  sessions, beneficiaires, benevoles, groupes, onEdit, onView, onDelete, onAddSeance,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
@@ -924,6 +1051,7 @@ function AteliersTab({
   onEdit: (s: Session) => void
   onView: (s: Session) => void
   onDelete: (id: number) => void
+  onAddSeance: (s: Session) => void
 }) {
   // ── Filtres + recherche ──
   const [search, setSearch]            = useState("")
@@ -1043,7 +1171,6 @@ function AteliersTab({
             </div>
           )}
           <div className="flex items-center gap-3 mt-1.5 flex-wrap text-xs text-muted">
-            <span>⏱ {s.duree}</span>
             {s.salle     && <span>📍 {s.salle}</span>}
             {s.periode && (
               <span className={`${chipText} font-medium flex items-center gap-1`}>
@@ -1140,6 +1267,12 @@ function AteliersTab({
               <ClipboardCheck size={11} /> Émarger
             </Link>
           )}
+          <button
+            onClick={() => onAddSeance(s)}
+            className={`flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-lg ${chipBgLight} ${chipText} hover:opacity-80 transition-opacity`}
+          >
+            <Clock size={11} /> + Séance
+          </button>
           <button onClick={() => onView(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-muted" aria-label="Voir les détails">
             <Eye size={13} />
           </button>
@@ -1530,6 +1663,7 @@ const TABS = [
   { id: "brouillon",     label: "Brouillon groupes",       icon: Shuffle },
   { id: "groupes",       label: "Groupes",                 icon: Columns3 },
   { id: "intervenants",  label: "Gestion des intervenants", icon: UserCog },
+  { id: "recap",         label: "Récap",                    icon: BarChart2 },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
@@ -1593,7 +1727,7 @@ export default function AteliersPage() {
       .catch(() => setIntervenants([]))
   }
 
-  // ── Séances (occurrences d'un atelier — table SEANCE) ──
+  // ── Séances (occurrences d'un atelier — lignes EVENEMENT2 Type="Séance") ──
   const [seances, setSeances] = useState<Seance[]>([])
   const [seanceSlide, setSeanceSlide] = useState(false)
   const [editingSeance, setEditingSeance] = useState<Seance | null>(null)
@@ -1615,13 +1749,12 @@ export default function AteliersPage() {
     setSeanceForm({ ...se, intervenants: se.intervenants.map(i => ({ ...i })) })
     setSeanceSlide(true)
   }
+  /** Simple raccourci de saisie : préremplit les horaires, ne stocke aucune
+   *  valeur "créneau" (EVENEMENT2 n'a pas cette colonne). */
   function applyCreneau(creneau: Creneau) {
     const preset = CRENEAUX.find(c => c.key === creneau)
-    setSeanceForm(f => ({
-      ...f, creneau,
-      heureDebut: preset?.heureDebut ?? f.heureDebut,
-      heureFin: preset?.heureFin ?? f.heureFin,
-    }))
+    if (!preset) return
+    setSeanceForm(f => ({ ...f, heureDebut: preset.heureDebut, heureFin: preset.heureFin }))
   }
   function toggleIntervenantInSeance(id: number) {
     setSeanceForm(f => ({
@@ -1640,8 +1773,8 @@ export default function AteliersPage() {
   async function handleSaveSeance() {
     const data = {
       ID_Atelier: seanceForm.atelierId,
+      Nom: seanceForm.nom,
       Date: seanceForm.date,
-      Creneau: seanceForm.creneau,
       Heure_Debut: seanceForm.heureDebut,
       Heure_Fin: seanceForm.heureFin,
       Salle: seanceForm.salle,
@@ -2132,6 +2265,7 @@ export default function AteliersPage() {
             onEdit={openEditSession}
             onView={openViewSession}
             onDelete={handleDeleteAtelier}
+            onAddSeance={s => openNewSeance(s.id, s.salle)}
           />
         )
       )}
@@ -2201,6 +2335,7 @@ export default function AteliersPage() {
       {tab === "intervenants" && (
         <IntervenantsTab intervenants={intervenants} onEdit={openEditIntervenant} onNew={openNewIntervenant} />
       )}
+      {tab === "recap" && <RecapEleveTab />}
 
       {/* ════════════════════════════════════════
           SLIDEOVER — Détails de l'atelier (lecture seule)
@@ -2389,14 +2524,13 @@ export default function AteliersPage() {
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {[...seances].sort((a, b) => a.date.localeCompare(b.date)).map(se => {
-                      const creneauLabel = CRENEAUX.find(c => c.key === se.creneau)?.label
                       const duree = dureeFromHeures(se.heureDebut, se.heureFin)
                       return (
                         <li key={se.id} className="flex items-center justify-between gap-2 text-sm bg-slate-50 border border-border rounded-lg px-3 py-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <Clock size={13} className="text-muted shrink-0" />
                             <span className="text-foreground truncate">
-                              {se.date || "—"}{creneauLabel && ` · ${creneauLabel}`}
+                              {se.date || "—"}{se.nom && ` · ${se.nom}`}
                               {se.heureDebut && ` · ${se.heureDebut}${se.heureFin ? `–${se.heureFin}` : ""}`}
                               {duree && ` (${duree})`}
                             </span>
@@ -2462,65 +2596,38 @@ export default function AteliersPage() {
           {/* ── Dates — élèves : début + fin (atelier sur plusieurs jours) ;
               parents : date unique (séance ponctuelle). ── */}
           {sessionForm.audience === "parents" ? (
+            <Field label="Date">
+              <Input
+                type="date"
+                value={sessionForm.date}
+                onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+              />
+            </Field>
+          ) : (
             <FormRow>
-              <Field label="Date">
+              <Field label="Date de début">
                 <Input
                   type="date"
                   value={sessionForm.date}
                   onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
                 />
               </Field>
-              <Field label="Heure">
+              <Field label="Date de fin">
                 <Input
-                  placeholder="14h00"
-                  value={sessionForm.heure}
-                  onChange={e => setSessionForm(f => ({ ...f, heure: e.target.value }))}
+                  type="date"
+                  value={sessionForm.dateFin}
+                  onChange={e => setSessionForm(f => ({ ...f, dateFin: e.target.value }))}
                 />
               </Field>
             </FormRow>
-          ) : (
-            <>
-              <FormRow>
-                <Field label="Date de début">
-                  <Input
-                    type="date"
-                    value={sessionForm.date}
-                    onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Date de fin">
-                  <Input
-                    type="date"
-                    value={sessionForm.dateFin}
-                    onChange={e => setSessionForm(f => ({ ...f, dateFin: e.target.value }))}
-                  />
-                </Field>
-              </FormRow>
-              <Field label="Heure">
-                <Input
-                  placeholder="14h00"
-                  value={sessionForm.heure}
-                  onChange={e => setSessionForm(f => ({ ...f, heure: e.target.value }))}
-                />
-              </Field>
-            </>
           )}
-          <FormRow>
-            <Field label="Durée">
-              <Input
-                placeholder="2h"
-                value={sessionForm.duree}
-                onChange={e => setSessionForm(f => ({ ...f, duree: e.target.value }))}
-              />
-            </Field>
-            <Field label="Salle">
-              <Input
-                placeholder="Salle A"
-                value={sessionForm.salle}
-                onChange={e => setSessionForm(f => ({ ...f, salle: e.target.value }))}
-              />
-            </Field>
-          </FormRow>
+          <Field label="Salle">
+            <Input
+              placeholder="Salle A"
+              value={sessionForm.salle}
+              onChange={e => setSessionForm(f => ({ ...f, salle: e.target.value }))}
+            />
+          </Field>
           <FormRow>
             <Field label="Statut">
               <Select
@@ -2893,7 +3000,7 @@ export default function AteliersPage() {
       </SlideOver>
 
       {/* ════════════════════════════════════════
-          SLIDEOVER — Séance (occurrence d'un atelier, table SEANCE du Sheet)
+          SLIDEOVER — Séance (occurrence d'un atelier, ligne EVENEMENT2 Type="Séance")
       ════════════════════════════════════════ */}
       <SlideOver
         open={seanceSlide}
@@ -2902,26 +3009,35 @@ export default function AteliersPage() {
         width="md"
       >
         <form onSubmit={e => { e.preventDefault(); handleSaveSeance() }} className="flex flex-col gap-4">
-          <FormRow>
-            <Field label="Date" required>
-              <Input
-                type="date"
-                value={seanceForm.date}
-                onChange={e => setSeanceForm(f => ({ ...f, date: e.target.value }))}
-              />
-            </Field>
-            <Field label="Créneau">
-              <Select
-                value={seanceForm.creneau}
-                onChange={e => applyCreneau(e.target.value as Creneau)}
-              >
-                <option value="">— Personnalisé —</option>
-                {CRENEAUX.map(c => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </Select>
-            </Field>
-          </FormRow>
+          <Field label="Nom de la séance">
+            <Input
+              placeholder="Ex : Séance 3 — lecture à voix haute"
+              value={seanceForm.nom}
+              onChange={e => setSeanceForm(f => ({ ...f, nom: e.target.value }))}
+            />
+          </Field>
+          <Field label="Date" required>
+            <Input
+              type="date"
+              value={seanceForm.date}
+              onChange={e => setSeanceForm(f => ({ ...f, date: e.target.value }))}
+            />
+          </Field>
+          <div>
+            <p className="text-[11px] text-muted mb-1.5">Raccourci horaires</p>
+            <div className="flex gap-2">
+              {CRENEAUX.map(c => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => applyCreneau(c.key)}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-foreground hover:bg-slate-200 transition-colors"
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <FormRow>
             <Field label="Heure de début">
               <Input

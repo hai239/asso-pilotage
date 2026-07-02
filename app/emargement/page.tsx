@@ -38,18 +38,12 @@ interface AssiduiteSheet {
 interface SeanceSheet {
   ID_Seance: string
   ID_Atelier: string
+  Nom: string
   Date: string
-  Creneau: string
   Heure_Debut: string
   Heure_Fin: string
   Salle: string
   Statut: string
-}
-
-const CRENEAU_LABELS: Record<string, string> = {
-  "matin": "Matin",
-  "apres-midi": "Après-midi",
-  "journee": "Journée entière",
 }
 
 function normStatut(v: string): PresenceStatus {
@@ -70,7 +64,7 @@ export default function EmargementPage() {
   const [loading, setLoading] = useState(true)
   const [erreur, setErreur] = useState<string | null>(null)
 
-  // ── Séances de l'atelier sélectionné (table SEANCE) ──
+  // ── Séances de l'atelier sélectionné ──
   // "" = pas de séance précise choisie → émargement au niveau de l'atelier entier
   // (rétrocompatible avec les ateliers qui n'ont pas encore de séances définies).
   const [seances, setSeances] = useState<SeanceSheet[]>([])
@@ -237,7 +231,7 @@ export default function EmargementPage() {
               <option value="">Toutes les séances (atelier entier)</option>
               {seances.map(s => (
                 <option key={s.ID_Seance} value={s.ID_Seance}>
-                  {s.Date}{s.Creneau && ` · ${CRENEAU_LABELS[s.Creneau] ?? s.Creneau}`}
+                  {s.Date}{s.Nom && ` · ${s.Nom}`}
                   {s.Heure_Debut && ` · ${s.Heure_Debut}${s.Heure_Fin ? `–${s.Heure_Fin}` : ""}`}
                 </option>
               ))}
