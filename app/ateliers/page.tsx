@@ -30,7 +30,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
-  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
+  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -918,131 +918,6 @@ const emptyIntervenantForm = (): IntervenantForm => ({
 })
 
 // ══════════════════════════════════════════════
-// ONGLET RÉCAP — bilan quantitatif des ateliers élèves
-// ══════════════════════════════════════════════
-interface RecapEleveRow {
-  atelier: string
-  dates: string
-  vacances: string
-  combienDeGroupe: number
-  combienDeSeances: number
-  dureeChaqueSeance: string
-  heuresParEleve: string
-  nElèves: number
-  elementaire6e: number
-  collegeLycee: number
-  nSalaries: number
-  hSalariees: number
-  nStagiaires: number
-  hStagiaires: number
-  nBenevoles: number
-  hBenevoles: number
-}
-
-const RECAP_COLONNES: { key: keyof RecapEleveRow; label: string }[] = [
-  { key: "atelier", label: "Atelier" },
-  { key: "dates", label: "Dates de l'atelier" },
-  { key: "vacances", label: "Vacances" },
-  { key: "combienDeGroupe", label: "Combien de groupes" },
-  { key: "combienDeSeances", label: "Combien de séances" },
-  { key: "dureeChaqueSeance", label: "Durée de chaque séance" },
-  { key: "heuresParEleve", label: "Heures par élève" },
-  { key: "nElèves", label: "N élèves" },
-  { key: "elementaire6e", label: "Élémentaires-6e" },
-  { key: "collegeLycee", label: "Collège-lycée" },
-  { key: "nSalaries", label: "N salariés impliqués" },
-  { key: "hSalariees", label: "N heures salariées" },
-  { key: "nStagiaires", label: "N stagiaires impliqués" },
-  { key: "hStagiaires", label: "N heures stagiaires" },
-  { key: "nBenevoles", label: "N bénévoles impliqués" },
-  { key: "hBenevoles", label: "N heures bénévoles" },
-]
-
-function RecapEleveTab() {
-  const [rows, setRows] = useState<RecapEleveRow[] | null>(null)
-  const [erreur, setErreur] = useState<string | null>(null)
-  const [exporting, setExporting] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-
-  function reload() {
-    setErreur(null)
-    fetch("/api/sheets?action=getRecapEleves")
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(data => setRows(data.rows))
-      .catch(() => setErreur("Impossible de calculer le récap depuis le Sheet."))
-  }
-  useEffect(reload, [])
-
-  async function handleExport() {
-    setExporting(true)
-    setMessage(null)
-    try {
-      const res = await fetch("/api/sheets", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "exportRecapEleves" }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      window.open(data.url, "_blank")
-      setMessage(`Export créé dans le dossier Bilan atelier : ${data.nomFichier}`)
-    } catch {
-      setMessage("Erreur : l'export CSV a échoué.")
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-sm text-muted">
-          Bilan quantitatif par type d'atelier et période — calculé en direct depuis le Sheet.
-        </p>
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={exporting || !rows?.length}
-          className="flex items-center gap-2 bg-ateliers-dark text-white px-4 py-2 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-        >
-          <BarChart2 size={14} /> {exporting ? "Export en cours…" : "Exporter en CSV"}
-        </button>
-      </div>
-
-      {message && <p className="text-xs text-ateliers-dark bg-ateliers-light rounded-lg px-3 py-2">{message}</p>}
-
-      {erreur ? (
-        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{erreur}</div>
-      ) : rows === null ? (
-        <p className="text-center text-sm text-muted py-12">Calcul du récap…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-center text-sm text-muted py-12">Aucun atelier élève à récapituler pour l'instant.</p>
-      ) : (
-        <div className="overflow-x-auto border border-border rounded-xl">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-border">
-                {RECAP_COLONNES.map(c => (
-                  <th key={c.key} className="text-left font-semibold text-muted px-3 py-2 whitespace-nowrap">{c.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} className="border-b border-border last:border-0 hover:bg-slate-50">
-                  {RECAP_COLONNES.map(c => (
-                    <td key={c.key} className="px-3 py-2 whitespace-nowrap text-foreground">{r[c.key] || "—"}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════
 // ONGLET ATELIERS
 // ══════════════════════════════════════════════
 function AteliersTab({
@@ -1694,7 +1569,6 @@ const TABS = [
   { id: "brouillon",     label: "Brouillon groupes",       icon: Shuffle },
   { id: "groupes",       label: "Groupes",                 icon: Columns3 },
   { id: "intervenants",  label: "Gestion des intervenants", icon: UserCog },
-  { id: "recap",         label: "Récap",                    icon: BarChart2 },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
@@ -1713,11 +1587,6 @@ export default function AteliersPage() {
   }
 
   const [tab, setTab] = useState<TabId>("ateliers")
-  // Le récap n'est pas encore fait pour les parents : si l'audience bascule
-  // dessus pendant qu'on est sur cet onglet, on retombe sur Ateliers.
-  useEffect(() => {
-    if (audience === "parents" && tab === "recap") setTab("ateliers")
-  }, [audience, tab])
   const [toast, setToast] = useState<{ message: string } | null>(null)
 
   // Auto-effacement du toast après 6 s
@@ -2271,7 +2140,7 @@ export default function AteliersPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg w-fit">
-        {TABS.filter(({ id }) => id !== "recap" || audience === "eleves").map(({ id, label, icon: Icon }) => (
+        {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -2371,7 +2240,6 @@ export default function AteliersPage() {
       {tab === "intervenants" && (
         <IntervenantsTab intervenants={intervenants} onEdit={openEditIntervenant} onNew={openNewIntervenant} />
       )}
-      {tab === "recap" && audience === "eleves" && <RecapEleveTab />}
 
       {/* ════════════════════════════════════════
           SLIDEOVER — Détails de l'atelier (lecture seule)
