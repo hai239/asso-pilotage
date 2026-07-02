@@ -30,7 +30,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, AlertTriangle, Sparkles, Shuffle,
-  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog,
+  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
@@ -182,6 +182,89 @@ function atelierFromSheet(a: AtelierSheet): Session {
     periode: a.Periode || "",
   }
 }
+
+// ──────────────────────────────────────────────
+// Séances — occurrences précises d'un atelier (table SEANCE du Sheet).
+// Un atelier (Session) reste le programme macro ; une Séance porte la date,
+// le créneau (matin/après-midi/journée), les horaires et les intervenants
+// propres à cette occurrence (ils peuvent différer d'une séance à l'autre).
+// ──────────────────────────────────────────────
+type Creneau = "matin" | "apres-midi" | "journee"
+
+const CRENEAUX: { key: Creneau; label: string; heureDebut: string; heureFin: string }[] = [
+  { key: "matin",      label: "Matin",           heureDebut: "09:00", heureFin: "12:00" },
+  { key: "apres-midi", label: "Après-midi",      heureDebut: "14:00", heureFin: "17:00" },
+  { key: "journee",    label: "Journée entière", heureDebut: "09:00", heureFin: "17:00" },
+]
+
+// Forme renvoyée par /api/sheets?action=getSeances.
+interface SeanceSheet {
+  ID_Seance: string
+  ID_Atelier: string
+  Date: string
+  Creneau: string
+  Heure_Debut: string
+  Heure_Fin: string
+  Salle: string
+  Statut: string
+  intervenants: { ID_Intervenant: string; Heures: string }[]
+}
+
+interface Seance {
+  id: number
+  atelierId: number
+  date: string // ISO, pour <input type="date">
+  creneau: Creneau | ""
+  heureDebut: string // "HH:MM", pour <input type="time">
+  heureFin: string
+  salle: string
+  statut: SessionStatut
+  intervenants: { id: number; heures: string }[]
+}
+
+function seanceFromSheet(s: SeanceSheet): Seance {
+  const statut = SESSION_STATUTS.includes(s.Statut as SessionStatut)
+    ? (s.Statut as SessionStatut)
+    : "planifié"
+  return {
+    id: Number(s.ID_Seance),
+    atelierId: Number(s.ID_Atelier),
+    date: frToIso(s.Date),
+    creneau: (s.Creneau as Creneau) || "",
+    heureDebut: s.Heure_Debut || "",
+    heureFin: s.Heure_Fin || "",
+    salle: s.Salle || "",
+    statut,
+    intervenants: s.intervenants
+      .map(i => ({ id: Number(i.ID_Intervenant), heures: i.Heures || "" }))
+      .filter(i => !isNaN(i.id)),
+  }
+}
+
+/** Durée lisible ("2h30") calculée depuis deux horaires "HH:MM". Vide si l'un
+ *  des deux manque ou si l'intervalle est nul/négatif — plus d'erreur de saisie
+ *  possible comparé à l'ancien champ texte libre. */
+function dureeFromHeures(heureDebut: string, heureFin: string): string {
+  const [h1, m1] = (heureDebut || "").split(":").map(Number)
+  const [h2, m2] = (heureFin || "").split(":").map(Number)
+  if ([h1, m1, h2, m2].some(n => isNaN(n))) return ""
+  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
+  if (mins <= 0) return ""
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
+}
+
+const emptySeance = (): Omit<Seance, "id"> => ({
+  atelierId: 0,
+  date: new Date().toISOString().split("T")[0],
+  creneau: "",
+  heureDebut: "",
+  heureFin: "",
+  salle: "",
+  statut: "planifié",
+  intervenants: [],
+})
 
 // Forme renvoyée par /api/sheets?action=getBeneficiaires.
 interface BeneficiaireSheet {
@@ -1510,6 +1593,92 @@ export default function AteliersPage() {
       .catch(() => setIntervenants([]))
   }
 
+  // ── Séances (occurrences d'un atelier — table SEANCE) ──
+  const [seances, setSeances] = useState<Seance[]>([])
+  const [seanceSlide, setSeanceSlide] = useState(false)
+  const [editingSeance, setEditingSeance] = useState<Seance | null>(null)
+  const [seanceForm, setSeanceForm] = useState<Omit<Seance, "id">>(emptySeance())
+
+  function reloadSeances(idAtelier: number) {
+    return fetch(`/api/sheets?action=getSeances&idAtelier=${idAtelier}`)
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows: SeanceSheet[]) => setSeances(rows.map(seanceFromSheet)))
+      .catch(() => setSeances([]))
+  }
+  function openNewSeance(atelierId: number, salleDefaut: string) {
+    setEditingSeance(null)
+    setSeanceForm({ ...emptySeance(), atelierId, salle: salleDefaut })
+    setSeanceSlide(true)
+  }
+  function openEditSeance(se: Seance) {
+    setEditingSeance(se)
+    setSeanceForm({ ...se, intervenants: se.intervenants.map(i => ({ ...i })) })
+    setSeanceSlide(true)
+  }
+  function applyCreneau(creneau: Creneau) {
+    const preset = CRENEAUX.find(c => c.key === creneau)
+    setSeanceForm(f => ({
+      ...f, creneau,
+      heureDebut: preset?.heureDebut ?? f.heureDebut,
+      heureFin: preset?.heureFin ?? f.heureFin,
+    }))
+  }
+  function toggleIntervenantInSeance(id: number) {
+    setSeanceForm(f => ({
+      ...f,
+      intervenants: f.intervenants.some(i => i.id === id)
+        ? f.intervenants.filter(i => i.id !== id)
+        : [...f.intervenants, { id, heures: "" }],
+    }))
+  }
+  function setHeuresIntervenantSeance(id: number, heures: string) {
+    setSeanceForm(f => ({
+      ...f,
+      intervenants: f.intervenants.map(i => i.id === id ? { ...i, heures } : i),
+    }))
+  }
+  async function handleSaveSeance() {
+    const data = {
+      ID_Atelier: seanceForm.atelierId,
+      Date: seanceForm.date,
+      Creneau: seanceForm.creneau,
+      Heure_Debut: seanceForm.heureDebut,
+      Heure_Fin: seanceForm.heureFin,
+      Salle: seanceForm.salle,
+      Statut: seanceForm.statut,
+    }
+    const intervenantsPayload = seanceForm.intervenants.map(i => ({ ID_Intervenant: i.id, Heures: i.heures }))
+    const body = editingSeance
+      ? { action: "updateSeance", idSeance: String(editingSeance.id), data, intervenants: intervenantsPayload }
+      : { action: "addSeance", data, intervenants: intervenantsPayload }
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setSeanceSlide(false)
+      await reloadSeances(seanceForm.atelierId)
+      setToast({ message: editingSeance ? "Séance mise à jour." : "Séance créée." })
+    } catch {
+      setToast({ message: "Erreur : l'enregistrement de la séance a échoué." })
+    }
+  }
+  async function handleDeleteSeance(id: number, atelierId: number) {
+    if (!confirm("Supprimer définitivement cette séance ?")) return
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteSeance", idSeance: String(id) }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setSeanceSlide(false)
+      await reloadSeances(atelierId)
+      setToast({ message: "Séance supprimée." })
+    } catch {
+      setToast({ message: "Erreur : la suppression a échoué." })
+    }
+  }
+
   // ── Membres (liste éditable côté /membres, on lit depuis localStorage pour
   //    refléter les ajouts/modifs faits sur l'autre page) ──
   type Membre = (typeof membresMock.liste)[number]
@@ -1577,6 +1746,7 @@ export default function AteliersPage() {
     setViewingSession(s)
     setGroupMembersDraft([...s.beneficiaireIds])
     setDetailSlide(true)
+    reloadSeances(s.id)
   }
   function toggleGroupMember(id: number) {
     setGroupMembersDraft(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
@@ -2193,6 +2363,49 @@ export default function AteliersPage() {
                 </div>
               )}
 
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <p className="text-[11px] text-muted">Séances ({seances.length})</p>
+                  <button
+                    type="button"
+                    onClick={() => openNewSeance(s.id, s.salle)}
+                    className="flex items-center gap-1 text-[11px] font-medium text-ateliers-dark hover:underline"
+                  >
+                    <Plus size={12} /> Ajouter une séance
+                  </button>
+                </div>
+                {seances.length === 0 ? (
+                  <p className="text-sm text-muted italic">Aucune séance renseignée.</p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {[...seances].sort((a, b) => a.date.localeCompare(b.date)).map(se => {
+                      const creneauLabel = CRENEAUX.find(c => c.key === se.creneau)?.label
+                      const duree = dureeFromHeures(se.heureDebut, se.heureFin)
+                      return (
+                        <li key={se.id} className="flex items-center justify-between gap-2 text-sm bg-slate-50 border border-border rounded-lg px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Clock size={13} className="text-muted shrink-0" />
+                            <span className="text-foreground truncate">
+                              {se.date || "—"}{creneauLabel && ` · ${creneauLabel}`}
+                              {se.heureDebut && ` · ${se.heureDebut}${se.heureFin ? `–${se.heureFin}` : ""}`}
+                              {duree && ` (${duree})`}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openEditSeance(se)}
+                            className="text-muted hover:text-foreground shrink-0"
+                            aria-label={`Modifier la séance du ${se.date}`}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+
               <div className="flex flex-col gap-2 pt-2 border-t border-border">
                 <button
                   type="button"
@@ -2626,11 +2839,15 @@ export default function AteliersPage() {
           </FormRow>
           <FormRow>
             <Field label="Type">
-              <Input
-                placeholder="Bénévole, Stagiaire, Salarié·e…"
+              <Select
                 value={intervenantForm.Type}
                 onChange={e => setIntervenantForm(f => ({ ...f, Type: e.target.value }))}
-              />
+              >
+                <option value="">— Choisir —</option>
+                <option value="Salarié·e">Salarié·e</option>
+                <option value="Bénévole">Bénévole</option>
+                <option value="Stagiaire">Stagiaire</option>
+              </Select>
             </Field>
             <Field label="Statut">
               <Select
@@ -2661,6 +2878,114 @@ export default function AteliersPage() {
           <SaveButton />
           {editingIntervenant && (
             <DeleteButton onClick={() => handleDeleteIntervenant(editingIntervenant.ID_Intervenant)} />
+          )}
+        </form>
+      </SlideOver>
+
+      {/* ════════════════════════════════════════
+          SLIDEOVER — Séance (occurrence d'un atelier, table SEANCE du Sheet)
+      ════════════════════════════════════════ */}
+      <SlideOver
+        open={seanceSlide}
+        onClose={() => setSeanceSlide(false)}
+        title={editingSeance ? "Modifier la séance" : "Nouvelle séance"}
+        width="md"
+      >
+        <form onSubmit={e => { e.preventDefault(); handleSaveSeance() }} className="flex flex-col gap-4">
+          <FormRow>
+            <Field label="Date" required>
+              <Input
+                type="date"
+                value={seanceForm.date}
+                onChange={e => setSeanceForm(f => ({ ...f, date: e.target.value }))}
+              />
+            </Field>
+            <Field label="Créneau">
+              <Select
+                value={seanceForm.creneau}
+                onChange={e => applyCreneau(e.target.value as Creneau)}
+              >
+                <option value="">— Personnalisé —</option>
+                {CRENEAUX.map(c => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </Select>
+            </Field>
+          </FormRow>
+          <FormRow>
+            <Field label="Heure de début">
+              <Input
+                type="time"
+                value={seanceForm.heureDebut}
+                onChange={e => setSeanceForm(f => ({ ...f, heureDebut: e.target.value }))}
+              />
+            </Field>
+            <Field label="Heure de fin">
+              <Input
+                type="time"
+                value={seanceForm.heureFin}
+                onChange={e => setSeanceForm(f => ({ ...f, heureFin: e.target.value }))}
+              />
+            </Field>
+          </FormRow>
+          {dureeFromHeures(seanceForm.heureDebut, seanceForm.heureFin) && (
+            <p className="text-xs text-muted -mt-2">
+              Durée calculée : <span className="font-medium text-foreground">{dureeFromHeures(seanceForm.heureDebut, seanceForm.heureFin)}</span>
+            </p>
+          )}
+          <FormRow>
+            <Field label="Salle">
+              <Input
+                value={seanceForm.salle}
+                onChange={e => setSeanceForm(f => ({ ...f, salle: e.target.value }))}
+              />
+            </Field>
+            <Field label="Statut">
+              <Select
+                value={seanceForm.statut}
+                onChange={e => setSeanceForm(f => ({ ...f, statut: e.target.value as SessionStatut }))}
+              >
+                {SESSION_STATUTS.map(st => <option key={st}>{st}</option>)}
+              </Select>
+            </Field>
+          </FormRow>
+          <Field label="Intervenants de cette séance">
+            <SelecteurIntervenants
+              options={intervenants}
+              selectedIds={seanceForm.intervenants.map(i => i.id)}
+              onToggle={toggleIntervenantInSeance}
+              placeholder="Sélectionner des intervenants…"
+            />
+          </Field>
+          {seanceForm.intervenants.length > 0 && (
+            <div className="flex flex-col gap-2 -mt-2">
+              {seanceForm.intervenants.map(entry => {
+                const iv = intervenants.find(x => Number(x.ID_Intervenant) === entry.id)
+                if (!iv) return null
+                return (
+                  <div key={entry.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-foreground truncate">{iv.Prenom} {iv.Nom}{iv.Type && ` · ${iv.Type}`}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={entry.heures}
+                        onChange={e => setHeuresIntervenantSeance(entry.id, e.target.value)}
+                        placeholder="0"
+                        className="w-16 px-2 py-1 text-sm rounded-lg border border-border bg-surface text-right focus:outline-none focus:ring-2 focus:ring-ateliers/30"
+                      />
+                      <span className="text-xs text-muted">h</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <SaveButton />
+          {editingSeance && (
+            <DeleteButton onClick={() => handleDeleteSeance(editingSeance.id, editingSeance.atelierId)} />
           )}
         </form>
       </SlideOver>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
-  sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn,
+  sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureSheet,
   uploadToDrive, getHeaders, deleteDriveFile,
 } from "@/lib/google-sheets-server"
 
@@ -42,13 +42,15 @@ export async function GET(request: NextRequest) {
       case "getEvenements":
         return ok(await getEvenements(sheets, searchParams.get("categorie") ?? undefined))
       case "getAssiduite":
-        return ok(await getAssiduite(sheets, searchParams.get("idEvenement") ?? undefined, searchParams.get("idPersonne") ?? undefined))
+        return ok(await getAssiduite(sheets, searchParams.get("idEvenement") ?? undefined, searchParams.get("idPersonne") ?? undefined, searchParams.get("idSeance") ?? undefined))
       case "getPositionnements":
         return ok(await getPositionnements(sheets))
       case "getAteliers":
         return ok(await getAteliers(sheets, searchParams.get("audience") ?? undefined))
       case "getIntervenants":
         return ok(await getIntervenants(sheets))
+      case "getSeances":
+        return ok(await getSeances(sheets, searchParams.get("idAtelier") ?? undefined))
       case "getBeneficiaires":
         return ok(await getBeneficiaires(sheets, searchParams.get("audience") ?? undefined))
       case "getEvaluations":
@@ -88,10 +90,13 @@ export async function POST(request: NextRequest) {
       case "addAssiduite":    return ok(await addAssiduite(sheets, body.data))
       case "updateAssiduite": return ok(await updateAssiduite(sheets, body.idAssiduite, body.data))
       case "deleteAssiduite": return ok(await deleteAssiduite(sheets, body.idAssiduite))
-      case "upsertAssiduite": return ok(await upsertAssiduite(sheets, body.idEvenement, body.idPersonne, body.statut, body.notes))
+      case "upsertAssiduite": return ok(await upsertAssiduite(sheets, body.idEvenement, body.idPersonne, body.statut, body.notes, body.idSeance))
       case "addAtelier":      return ok(await addAtelier(sheets, body.data, body.beneficiaireIds, body.intervenantIds))
       case "updateAtelier":   return ok(await updateAtelier(sheets, body.idAtelier, body.data, body.beneficiaireIds, body.intervenantIds))
       case "deleteAtelier":   return ok(await deleteAtelier(sheets, body.idAtelier))
+      case "addSeance":       return ok(await addSeance(sheets, body.data, body.intervenants))
+      case "updateSeance":    return ok(await updateSeance(sheets, body.idSeance, body.data, body.intervenants))
+      case "deleteSeance":    return ok(await deleteSeance(sheets, body.idSeance))
       case "addIntervenant":    return ok(await addIntervenant(sheets, body.data))
       case "updateIntervenant": return ok(await updateIntervenant(sheets, body.idIntervenant, body.data))
       case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
@@ -323,17 +328,19 @@ async function getEvenements(sheets: Sheets, categorie?: string) {
     }))
 }
 
-async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: string) {
+async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: string, idSeance?: string) {
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
   return rows
     .filter((r) => {
       const matchE = !idEvenement || String(r["Evenement2 ID"]) === String(idEvenement)
       const matchP = !idPersonne  || String(r["Personne ID"])  === String(idPersonne)
-      return matchE && matchP
+      const matchS = !idSeance    || String(r["Seance ID"] ?? "") === String(idSeance)
+      return matchE && matchP && matchS
     })
     .map((r) => ({
       ID_Assiduite: String(r["ID"]),
       ID_Evenement: String(r["Evenement2 ID"]),
+      ID_Seance: String(r["Seance ID"] ?? ""),
       ID_Personne:  String(r["Personne ID"]),
       Statut: r["ETAT"] ?? "present",
       Notes: r["Commentaire"] ?? "",
@@ -840,10 +847,12 @@ async function deleteEvenement(sheets: Sheets, idEvenement: string) {
 // ── ÉCRITURE ASSIDUITÉ ────────────────────────────────────
 
 async function addAssiduite(sheets: Sheets, data: Record<string, unknown>) {
+  await ensureColumn(sheets, "ASSIDUITE", "Seance ID")
   const id = await nextId(sheets, "ASSIDUITE")
   await appendRow(sheets, "ASSIDUITE", {
     "ID": id,
     "Evenement2 ID": data.ID_Evenement ?? "",
+    "Seance ID": data.ID_Seance ?? "",
     "Personne ID": data.ID_Personne ?? "",
     "ETAT": data.Statut ?? "present",
     "Commentaire": data.Notes ?? "",
@@ -869,13 +878,18 @@ async function upsertAssiduite(
   idEvenement: string,
   idPersonne: string,
   statut: string,
-  notes?: string
+  notes?: string,
+  idSeance?: string
 ) {
+  await ensureColumn(sheets, "ASSIDUITE", "Seance ID")
   const rows = await sheetToObjects(sheets, "ASSIDUITE")
-  const existing = rows.find(
-    (r) =>
-      String(r["Evenement2 ID"]) === String(idEvenement) &&
-      String(r["Personne ID"]) === String(idPersonne)
+  // Avec idSeance : une ligne par (séance, personne). Sans idSeance (ancien
+  // comportement, émargement au niveau atelier entier) : une ligne par (atelier, personne).
+  const existing = rows.find((r) =>
+    String(r["Personne ID"]) === String(idPersonne) &&
+    (idSeance
+      ? String(r["Seance ID"] ?? "") === String(idSeance)
+      : String(r["Evenement2 ID"]) === String(idEvenement))
   )
 
   if (existing) {
@@ -889,6 +903,7 @@ async function upsertAssiduite(
   await appendRow(sheets, "ASSIDUITE", {
     "ID": id,
     "Evenement2 ID": idEvenement,
+    "Seance ID": idSeance ?? "",
     "Personne ID": idPersonne,
     "ETAT": statut ?? "present",
     "Commentaire": notes ?? "",
@@ -988,11 +1003,127 @@ async function updateAtelier(
 }
 
 async function deleteAtelier(sheets: Sheets, idAtelier: string) {
-  // Cascade : liens bénéficiaires/intervenants + émargement rattachés à cet atelier.
+  // Cascade : séances rattachées (+ leurs propres liens intervenants/émargement),
+  // puis liens bénéficiaires/intervenants + émargement au niveau de l'atelier entier.
+  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
+  const seances = await sheetToObjects(sheets, "SEANCE")
+  const idsSeances = seances
+    .filter((s) => String(s["Atelier ID"]) === String(idAtelier))
+    .map((s) => String(s["ID"]))
+  if (idsSeances.length) {
+    await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Seance ID", idsSeances)
+    await deleteRowsWhere(sheets, "ASSIDUITE", "Seance ID", idsSeances)
+    await deleteRowsWhere(sheets, "SEANCE", "Atelier ID", [String(idAtelier)])
+  }
   await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Atelier ID", [String(idAtelier)])
   await deleteRowsWhere(sheets, "ASSIDUITE", "Evenement2 ID", [String(idAtelier)])
   const deleted = await deleteRowById(sheets, "EVENEMENT2", idAtelier)
   return deleted ? { ok: true } : { error: "Atelier introuvable" }
+}
+
+// ── SÉANCE ────────────────────────────────────────────────
+// Une séance est une occurrence précise d'un atelier (une date + un créneau
+// matin/après-midi/journée, avec ses propres horaires, salle et intervenants).
+// Un atelier (EVENEMENT2) reste le programme macro ; SEANCE est la table de
+// détail, nouvelle, créée à la volée via ensureSheet si elle n'existe pas encore.
+
+const SEANCE_HEADERS = ["ID", "Atelier ID", "Date", "Creneau", "Heure Debut", "Heure Fin", "Salle", "Statut"]
+
+/** Reconstruit toujours la ligne complète depuis `data` (même convention que
+ *  `atelierRow`) : le formulaire séance doit envoyer l'état complet à chaque
+ *  sauvegarde, pas un diff partiel — sinon les champs absents sont effacés. */
+function seanceRow(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    "Atelier ID": data.ID_Atelier ?? "",
+    "Date": isoToFr(data.Date),
+    "Creneau": data.Creneau ?? "",
+    "Heure Debut": data.Heure_Debut ?? "",
+    "Heure Fin": data.Heure_Fin ?? "",
+    "Salle": data.Salle ?? "",
+    "Statut": data.Statut ?? "planifié",
+  }
+}
+
+async function getSeances(sheets: Sheets, idAtelier?: string) {
+  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
+  const [seances, participants] = await Promise.all([
+    sheetToObjects(sheets, "SEANCE"),
+    sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
+  ])
+  return seances
+    .filter((s) => !idAtelier || String(s["Atelier ID"]) === String(idAtelier))
+    .map((s) => {
+      const id = String(s["ID"])
+      const intervenants = participants
+        .filter((l) => l["Role"] === "Intervenant" && String(l["Seance ID"] ?? "") === id)
+        .map((l) => ({
+          ID_Intervenant: String(l["Intervenant ID"]),
+          Heures: l["Heures"] ?? "",
+        }))
+      return {
+        ID_Seance: id,
+        ID_Atelier: String(s["Atelier ID"]),
+        Date: fmtDate(s["Date"] as string),
+        Creneau: s["Creneau"] ?? "",
+        Heure_Debut: s["Heure Debut"] ?? "",
+        Heure_Fin: s["Heure Fin"] ?? "",
+        Salle: s["Salle"] ?? "",
+        Statut: s["Statut"] ?? "planifié",
+        intervenants,
+      }
+    })
+}
+
+/** Remplace les intervenants (+ heures) rattachés à une séance précise. */
+async function syncSeanceIntervenants(
+  sheets: Sheets,
+  idSeance: string | number,
+  entries: { ID_Intervenant: string | number; Heures?: string | number }[]
+) {
+  await ensureColumn(sheets, "ATELIER_PARTICIPANT", "Seance ID")
+  await deleteRowsWhereAll(sheets, "ATELIER_PARTICIPANT", { "Seance ID": String(idSeance), "Role": "Intervenant" })
+  for (const entry of entries) {
+    const rid = await nextId(sheets, "ATELIER_PARTICIPANT")
+    await appendRow(sheets, "ATELIER_PARTICIPANT", {
+      "ID": rid,
+      "Seance ID": idSeance,
+      "Intervenant ID": entry.ID_Intervenant,
+      "Role": "Intervenant",
+      "Heures": entry.Heures ?? "",
+      "Fonction": "",
+    })
+  }
+}
+
+async function addSeance(
+  sheets: Sheets,
+  data: Record<string, unknown>,
+  intervenants?: { ID_Intervenant: string | number; Heures?: string | number }[],
+) {
+  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
+  const id = await nextId(sheets, "SEANCE")
+  await appendRow(sheets, "SEANCE", { "ID": id, ...seanceRow(data) })
+  if (intervenants) await syncSeanceIntervenants(sheets, id, intervenants)
+  return { ok: true, ID_Seance: String(id) }
+}
+
+async function updateSeance(
+  sheets: Sheets,
+  idSeance: string,
+  data: Record<string, unknown>,
+  intervenants?: { ID_Intervenant: string | number; Heures?: string | number }[],
+) {
+  const updated = await updateRowById(sheets, "SEANCE", idSeance, seanceRow(data))
+  if (!updated) return { error: "Séance introuvable" }
+  if (intervenants) await syncSeanceIntervenants(sheets, idSeance, intervenants)
+  return { ok: true }
+}
+
+async function deleteSeance(sheets: Sheets, idSeance: string) {
+  await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Seance ID", [String(idSeance)])
+  await deleteRowsWhere(sheets, "ASSIDUITE", "Seance ID", [String(idSeance)])
+  const deleted = await deleteRowById(sheets, "SEANCE", idSeance)
+  return deleted ? { ok: true } : { error: "Séance introuvable" }
 }
 
 // ── Helpers mapping ───────────────────────────────────────
