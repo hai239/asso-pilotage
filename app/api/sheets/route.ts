@@ -67,6 +67,10 @@ export async function GET(request: NextRequest) {
         return ok(await getEvaluations(sheets))
       case "getRecapEleves":
         return ok({ rows: await computeRecapEleves(sheets) })
+      case "getEtablissements":
+        return ok(await getEtablissements(sheets))
+      case "getProfesseurs":
+        return ok(await getProfesseurs(sheets, searchParams.get("idEtab") ?? ""))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -114,6 +118,9 @@ export async function POST(request: NextRequest) {
       case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
       case "upsertEvaluation":  return ok(await upsertEvaluation(sheets, String(body.idPersonne), body.session, body.data))
       case "deleteEvaluation":  return ok(await deleteEvaluation(sheets, body.idEvaluation))
+      case "addEtablissement": return ok(await addEtablissement(sheets, body.data))
+      case "addProfesseur":    return ok(await addProfesseur(sheets, body.data))
+      case "addScolarite":     return ok(await addScolariteEntry(sheets, body))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
       case "addPost":         return ok(await addPost(sheets, body.data))
@@ -911,9 +918,31 @@ async function updateMembre(sheets: Sheets, idMembre: string, data: Record<strin
   if (data.Charte !== undefined)           pmap["Charte d'engagement"] = data.Charte
   if (data.Beneficiaire !== undefined)     pmap["Beneficiaire"] = data.Beneficiaire
   if (data.Notes !== undefined)            pmap["Commentaire"] = data.Notes
+  // WhatsApp : colonne créée à la volée si absente de PERSONNE
+  if (data.WhatsApp !== undefined) {
+    await ensureColumn(sheets, "PERSONNE", "WhatsApp")
+    pmap["WhatsApp"] = data.WhatsApp
+  }
 
   const updated = await updateRowById(sheets, "PERSONNE", idMembre, pmap)
   if (!updated) return { error: "Personne introuvable" }
+
+  // Unicité du contact principal : un seul « Oui » par famille.
+  if (String(data.Contact_Principal ?? "").toLowerCase() === "oui") {
+    const personnes = await sheetToObjects(sheets, "PERSONNE")
+    const self = personnes.find((p) => String(p["ID"]) === String(idMembre))
+    const famId = self ? String(self["Famille ID"]) : ""
+    if (famId) {
+      const autres = personnes.filter((p) =>
+        String(p["Famille ID"]) === famId &&
+        String(p["ID"]) !== String(idMembre) &&
+        String(p["Contact principal"] ?? "").toLowerCase() === "oui"
+      )
+      for (const p of autres) {
+        await updateRowById(sheets, "PERSONNE", String(p["ID"]), { "Contact principal": "Non" })
+      }
+    }
+  }
 
   if (
     data.Statut_Inscription !== undefined ||
@@ -1648,6 +1677,53 @@ async function exportRecapEleves(sheets: Sheets) {
   return { ok: true, url, nomFichier }
 }
 
+// ── ÉTABLISSEMENT / PROFESSEUR / SCOLARITE ────────────────
+
+async function getEtablissements(sheets: Sheets) {
+  const rows = await sheetToObjects(sheets, "ETABLISSEMENT")
+  return rows.map(r => ({ ID: String(r["ID"]), Type: String(r["Type"] ?? ""), Nom: String(r["Nom"] ?? "") }))
+}
+
+async function getProfesseurs(sheets: Sheets, idEtab: string) {
+  const rows = await sheetToObjects(sheets, "PROFESSEUR")
+  return rows
+    .filter(r => !idEtab || String(r["Etablissement ID"]) === idEtab)
+    .map(r => ({ ID: String(r["ID"]), Nom: String(r["Nom"] ?? ""), Telephone: String(r["Telephone"] ?? ""), Email: String(r["Email"] ?? "") }))
+}
+
+async function addEtablissement(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "ETABLISSEMENT")
+  await appendRow(sheets, "ETABLISSEMENT", { "ID": id, "Type": data.Type ?? "", "Nom": data.Nom ?? "" })
+  return { ok: true, ID: String(id) }
+}
+
+async function addProfesseur(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "PROFESSEUR")
+  await appendRow(sheets, "PROFESSEUR", {
+    "ID": id, "Nom": data.Nom ?? "", "Telephone": data.Telephone ?? "",
+    "Email": data.Email ?? "", "Etablissement ID": data.Etablissement_ID ?? "",
+  })
+  return { ok: true, ID: String(id) }
+}
+
+async function addScolariteEntry(sheets: Sheets, body: Record<string, unknown>) {
+  const idMembre = String(body.idMembre ?? "")
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  const existing = scolarites.find(s => String(s["Personne ID"]) === idMembre)
+  if (existing) {
+    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), {
+      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+    })
+  } else {
+    const id = await nextId(sheets, "SCOLARITE")
+    await appendRow(sheets, "SCOLARITE", {
+      "ID": id, "Personne ID": idMembre,
+      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+    })
+  }
+  return { ok: true }
+}
+
 // ── Helpers mapping ───────────────────────────────────────
 
 function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unknown>[]) {
@@ -1666,7 +1742,7 @@ function mapMembre(p: Record<string, unknown>, inscriptions: Record<string, unkn
     Pays_Origine: p["Pays d'origine"],
     Telephone: p["Telephone"],
     Email: p["Email"],
-    WhatsApp: "",
+    WhatsApp: p["WhatsApp"] ?? "",
     Droit_Image: p[COL_DROIT_IMAGE],
     Charte: p["Charte d'engagement"],
     Beneficiaire: p["Beneficiaire"],

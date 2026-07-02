@@ -315,6 +315,31 @@ export async function uploadPostMedia(data: {
   return apiPost({ action: "uploadPostMedia", ...data }) as Promise<{ ok: boolean; url: string; fileId: string }>
 }
 
+// ── Établissements / Professeurs / Scolarité ───
+
+export interface EtablissementItem { ID: string; Type: string; Nom: string }
+export interface ProfesseurItem    { ID: string; Nom: string; Telephone: string; Email: string }
+
+export async function fetchEtablissements(): Promise<EtablissementItem[]> {
+  return apiGet("getEtablissements") as Promise<EtablissementItem[]>
+}
+
+export async function fetchProfesseurs(idEtab: string): Promise<ProfesseurItem[]> {
+  return apiGet("getProfesseurs", { idEtab }) as Promise<ProfesseurItem[]>
+}
+
+export async function addEtablissement(data: { Type: string; Nom: string }): Promise<{ ok: boolean; ID: string }> {
+  return apiPost({ action: "addEtablissement", data }) as Promise<{ ok: boolean; ID: string }>
+}
+
+export async function addProfesseur(data: { Nom: string; Telephone: string; Email: string; Etablissement_ID: string }): Promise<{ ok: boolean; ID: string }> {
+  return apiPost({ action: "addProfesseur", data }) as Promise<{ ok: boolean; ID: string }>
+}
+
+export async function addScolarite(idMembre: string, idEtab: string, idProf: string): Promise<{ ok: boolean }> {
+  return apiPost({ action: "addScolarite", idMembre, idEtab, idProf }) as Promise<{ ok: boolean }>
+}
+
 // ── Indicateur de configuration ────────────────
 export function isApiConfigured(): boolean {
   return !!API_URL
