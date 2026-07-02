@@ -67,6 +67,10 @@ export async function GET(request: NextRequest) {
         return ok(await getEvaluations(sheets))
       case "getRecapEleves":
         return ok({ rows: await computeRecapEleves(sheets) })
+      case "getEtablissements":
+        return ok(await getEtablissements(sheets))
+      case "getProfesseurs":
+        return ok(await getProfesseurs(sheets, searchParams.get("idEtab") ?? ""))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -114,6 +118,9 @@ export async function POST(request: NextRequest) {
       case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
       case "upsertEvaluation":  return ok(await upsertEvaluation(sheets, String(body.idPersonne), body.session, body.data))
       case "deleteEvaluation":  return ok(await deleteEvaluation(sheets, body.idEvaluation))
+      case "addEtablissement": return ok(await addEtablissement(sheets, body.data))
+      case "addProfesseur":    return ok(await addProfesseur(sheets, body.data))
+      case "addScolarite":     return ok(await addScolariteEntry(sheets, body))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
       case "addPost":         return ok(await addPost(sheets, body.data))
@@ -1664,6 +1671,53 @@ async function exportRecapEleves(sheets: Sheets) {
 
   const { url } = await uploadToDrive(nomFichier, "text/csv", base64, BILAN_ATELIER_FOLDER_ID)
   return { ok: true, url, nomFichier }
+}
+
+// ── ÉTABLISSEMENT / PROFESSEUR / SCOLARITE ────────────────
+
+async function getEtablissements(sheets: Sheets) {
+  const rows = await sheetToObjects(sheets, "ETABLISSEMENT")
+  return rows.map(r => ({ ID: String(r["ID"]), Type: String(r["Type"] ?? ""), Nom: String(r["Nom"] ?? "") }))
+}
+
+async function getProfesseurs(sheets: Sheets, idEtab: string) {
+  const rows = await sheetToObjects(sheets, "PROFESSEUR")
+  return rows
+    .filter(r => !idEtab || String(r["Etablissement ID"]) === idEtab)
+    .map(r => ({ ID: String(r["ID"]), Nom: String(r["Nom"] ?? ""), Telephone: String(r["Telephone"] ?? ""), Email: String(r["Email"] ?? "") }))
+}
+
+async function addEtablissement(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "ETABLISSEMENT")
+  await appendRow(sheets, "ETABLISSEMENT", { "ID": id, "Type": data.Type ?? "", "Nom": data.Nom ?? "" })
+  return { ok: true, ID: String(id) }
+}
+
+async function addProfesseur(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "PROFESSEUR")
+  await appendRow(sheets, "PROFESSEUR", {
+    "ID": id, "Nom": data.Nom ?? "", "Telephone": data.Telephone ?? "",
+    "Email": data.Email ?? "", "Etablissement ID": data.Etablissement_ID ?? "",
+  })
+  return { ok: true, ID: String(id) }
+}
+
+async function addScolariteEntry(sheets: Sheets, body: Record<string, unknown>) {
+  const idMembre = String(body.idMembre ?? "")
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  const existing = scolarites.find(s => String(s["Personne ID"]) === idMembre)
+  if (existing) {
+    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), {
+      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+    })
+  } else {
+    const id = await nextId(sheets, "SCOLARITE")
+    await appendRow(sheets, "SCOLARITE", {
+      "ID": id, "Personne ID": idMembre,
+      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+    })
+  }
+  return { ok: true }
 }
 
 // ── Helpers mapping ───────────────────────────────────────

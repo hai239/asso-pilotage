@@ -587,7 +587,11 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
         ) : (
           <ul className="space-y-2">
             {inscriptions.map(insc => {
-              const montantDu = (Number(insc.Montant_Adhesion) || 0) + (Number(insc.Montant_Inscription) || 0)
+              const montantDu  = (Number(insc.Montant_Adhesion) || 0) + (Number(insc.Montant_Inscription) || 0)
+              const montantPaye = paiements
+                .filter(p => p.ID_Inscription === insc.ID_Inscription)
+                .reduce((s, p) => s + (Number(p.Montant) || 0), 0)
+              const resteInsc  = montantDu - montantPaye
               return (
                 <li key={insc.ID_Inscription} className="rounded-lg border border-border px-4 py-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -596,6 +600,12 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
                       {insc.Date_Inscription && (
                         <span className="text-xs text-muted">{insc.Date_Inscription}</span>
                       )}
+                      {montantDu === 0 && montantPaye === 0
+                        ? <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600">Exonéré</span>
+                        : resteInsc <= 0
+                          ? <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-finances-light text-finances-dark">Soldé ✓</span>
+                          : <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-absences-light text-absences-dark">Reste {resteInsc} €</span>
+                      }
                       {insc.Statut && (
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           insc.Statut.toUpperCase().includes("COURS")   ? "bg-finances-light text-finances-dark"  :
@@ -677,6 +687,11 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             s + (Number(insc.Montant_Adhesion) || 0) + (Number(insc.Montant_Inscription) || 0), 0)
           const totalPaye = paiements.reduce((s, p) => s + (Number(p.Montant) || 0), 0)
           const totalReste = totalAttendu - totalPaye
+          if (totalAttendu === 0 && paiements.length === 0) return (
+            <div className="mb-4">
+              <span className="text-xs px-3 py-1.5 rounded-full font-medium bg-slate-100 text-slate-600">Exonéré</span>
+            </div>
+          )
           if (totalAttendu === 0) return null
           return (
             <div className="mb-4">
