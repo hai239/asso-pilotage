@@ -1,10 +1,12 @@
 import type { Metadata } from "next"
-import { Geist } from "next/font/google"
+import { Inter, Poppins } from "next/font/google"
 import "./globals.css"
 import { AuthProvider } from "@/lib/auth-context"
 import AuthGate from "@/components/AuthGate"
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
+// Charte « Estuaire » : Inter (texte) + Poppins (titres)
+const inter = Inter({ variable: "--font-inter", subsets: ["latin"] })
+const poppins = Poppins({ variable: "--font-poppins", weight: ["500", "600", "700"], subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Asso – Pilotage",
@@ -13,7 +15,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className={`${geistSans.variable} h-full`}>
+    <html lang="fr" className={`${inter.variable} ${poppins.variable} h-full`}>
       <body className="h-full flex bg-background">
         <a href="#main-content" className="skip-nav">Aller au contenu principal</a>
         <AuthProvider>
