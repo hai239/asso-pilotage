@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import SlideOver, { Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton } from "@/components/SlideOver"
+import Pagination, { usePagination } from "@/components/Pagination"
 import { Plus, Pencil, UserCheck, UserX, Users, ShieldCheck } from "lucide-react"
 import { type StatutMembre, type AuthUser } from "@/lib/auth"
 import { MODULES, MODULE_PRESETS, ALL_MODULE_KEYS, type ModuleKey } from "@/lib/modules"
@@ -63,6 +64,8 @@ export default function MembresPage() {
   const [confirmPwd, setConfirmPwd] = useState("")
   const [error,     setError]     = useState("")
   const [saving,    setSaving]    = useState(false)
+
+  const { page, setPage, pageSize, changePageSize, total, totalPages, pageItems: pagedMembres } = usePagination(membres, "asso-membres-page-size")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -204,7 +207,7 @@ export default function MembresPage() {
           <p className="text-center text-sm text-muted py-8 italic">Aucun membre trouvé</p>
         ) : (
           <ul className="divide-y divide-border">
-            {membres.map((m) => {
+            {pagedMembres.map((m) => {
               const nbAcces = m.isAdmin ? ALL_MODULE_KEYS.length : (m.modules?.length ?? 0)
               return (
                 <li key={m.id} className="px-5 py-4 flex items-center gap-4 hover:bg-slate-50 group">
@@ -240,6 +243,11 @@ export default function MembresPage() {
               )
             })}
           </ul>
+        )}
+        {!loading && membres.length > 0 && (
+          <div className="px-5 pb-4">
+            <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={changePageSize} />
+          </div>
         )}
       </section>
 

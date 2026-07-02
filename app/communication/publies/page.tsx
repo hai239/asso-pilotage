@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { ChevronRight, Users } from "lucide-react"
 import SlideOver from "@/components/SlideOver"
+import Pagination, { usePagination } from "@/components/Pagination"
 import { fetchPosts } from "@/lib/sheets-api"
 
 // ──────────────────────────────────────────────
@@ -66,6 +67,8 @@ export default function PubliesPage() {
 
   function openPost(p: Post) { setSelected(p); setSlideOpen(true) }
 
+  const { pageItems: pagedPosts, page, setPage, pageSize, changePageSize, total, totalPages } = usePagination(posts, "asso-communication-publies-page-size")
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
 
@@ -92,7 +95,7 @@ export default function PubliesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-4">
-          {posts.map(p => (
+          {pagedPosts.map(p => (
             <div
               key={p.id}
               onClick={() => openPost(p)}
@@ -127,6 +130,9 @@ export default function PubliesPage() {
             </div>
           ))}
         </div>
+      )}
+      {posts.length > 0 && (
+        <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={changePageSize} accentClass="focus:ring-2 focus:ring-communication/30" />
       )}
 
       {/* SlideOver lecture */}

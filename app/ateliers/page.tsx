@@ -35,6 +35,7 @@ import {
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
 } from "@/components/SlideOver"
+import Pagination, { usePagination } from "@/components/Pagination"
 import BrouillonGroupesTab from "./brouillon-tab"
 
 // ──────────────────────────────────────────────
@@ -970,6 +971,9 @@ function AteliersTab({
   const upcoming = sorted.filter(s => s.statut !== "terminé" && s.statut !== "annulé")
   const past     = sorted.filter(s => s.statut === "terminé" || s.statut === "annulé")
 
+  const upcomingPagination = usePagination(upcoming, "asso-ateliers-upcoming-page-size")
+  const pastPagination     = usePagination(past, "asso-ateliers-past-page-size")
+
   const filtreActif = q !== "" || filterBenevole !== "tous" || filterDate !== "tous"
   function resetFiltres() {
     setSearch(""); setFilterBenevole("tous"); setFilterDate("tous")
@@ -1221,8 +1225,19 @@ function AteliersTab({
             <h2 className="font-semibold text-foreground text-sm">À venir</h2>
           </div>
           <ul className="divide-y divide-border">
-            {upcoming.map(s => <SessionCard key={s.id} s={s} />)}
+            {upcomingPagination.pageItems.map(s => <SessionCard key={s.id} s={s} />)}
           </ul>
+          <div className="px-5 pb-4">
+            <Pagination
+              page={upcomingPagination.page}
+              totalPages={upcomingPagination.totalPages}
+              total={upcomingPagination.total}
+              pageSize={upcomingPagination.pageSize}
+              onPageChange={upcomingPagination.setPage}
+              onPageSizeChange={upcomingPagination.changePageSize}
+              accentClass="focus:ring-2 focus:ring-ateliers/30"
+            />
+          </div>
         </section>
       )}
       {past.length > 0 && (
@@ -1231,8 +1246,19 @@ function AteliersTab({
             <h2 className="font-semibold text-muted text-sm">Passés</h2>
           </div>
           <ul className="divide-y divide-border">
-            {past.map(s => <SessionCard key={s.id} s={s} />)}
+            {pastPagination.pageItems.map(s => <SessionCard key={s.id} s={s} />)}
           </ul>
+          <div className="px-5 pb-4">
+            <Pagination
+              page={pastPagination.page}
+              totalPages={pastPagination.totalPages}
+              total={pastPagination.total}
+              pageSize={pastPagination.pageSize}
+              onPageChange={pastPagination.setPage}
+              onPageSizeChange={pastPagination.changePageSize}
+              accentClass="focus:ring-2 focus:ring-ateliers/30"
+            />
+          </div>
         </section>
       )}
       {sessions.length === 0 && (

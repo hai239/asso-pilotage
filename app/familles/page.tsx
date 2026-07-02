@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Search, Plus } from "lucide-react"
 import SlideOver, { Field, Input, FormRow, SaveButton } from "@/components/SlideOver"
 import AdresseAutocomplete from "@/components/AdresseAutocomplete"
+import Pagination, { usePagination } from "@/components/Pagination"
 import { fetchFamilles, fetchMembres, addFamille, isApiConfigured, type FamilleSheet, type MembreSheet } from "@/lib/sheets-api"
 
 type Onglet = "familles" | "membres"
@@ -71,6 +72,9 @@ export default function FamillesPage() {
   const filteredMembres = membres
     .filter(m => norm(m.Prenom ?? "").startsWith(q) || norm(m.Nom ?? "").startsWith(q))
     .sort((a, b) => (a.Prenom ?? "").localeCompare(b.Prenom ?? "", "fr"))
+
+  const famillesPagination = usePagination(filteredFamilles, "asso-familles-page-size")
+  const membresPagination  = usePagination(filteredMembres, "asso-familles-membres-page-size")
 
   const tabs = [
     { key: "familles" as Onglet, label: "Familles", count: familles.length },
@@ -159,34 +163,45 @@ export default function FamillesPage() {
         filteredFamilles.length === 0
           ? <p className="text-muted text-sm text-center mt-16">Aucune famille trouvée.</p>
           : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredFamilles.map(famille => {
-                const membresF = membres.filter(m => m.ID_Famille === famille.ID_Famille)
-                return (
-                  <Link
-                    key={famille.ID_Famille}
-                    href={`/familles/${famille.ID_Famille}`}
-                    className="bg-surface border border-border rounded-xl p-5 hover:border-familles/40 hover:shadow-sm transition-all block"
-                  >
-                    <p className="text-lg font-bold text-familles-dark">{famille.Nom_Famille || "—"}</p>
-                    {(famille.Adresse_Complete || famille.Adresse) && (
-                      <p className="text-xs text-slate-400 mt-1">{famille.Adresse_Complete || famille.Adresse}</p>
-                    )}
-                    <div className="mt-4 flex items-center justify-between gap-2">
-                      {String(famille.Quartier_QVP ?? "").trim()
-                        ? <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-familles-light text-familles-dark">
-                            QVP {String(famille.Quartier_QVP).toUpperCase()}
-                          </span>
-                        : <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-500">Hors QVP</span>
-                      }
-                      <span className="text-xs text-muted">
-                        {membresF.length} membre{membresF.length > 1 ? "s" : ""}
-                      </span>
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {famillesPagination.pageItems.map(famille => {
+                  const membresF = membres.filter(m => m.ID_Famille === famille.ID_Famille)
+                  return (
+                    <Link
+                      key={famille.ID_Famille}
+                      href={`/familles/${famille.ID_Famille}`}
+                      className="bg-surface border border-border rounded-xl p-5 hover:border-familles/40 hover:shadow-sm transition-all block"
+                    >
+                      <p className="text-lg font-bold text-familles-dark">{famille.Nom_Famille || "—"}</p>
+                      {(famille.Adresse_Complete || famille.Adresse) && (
+                        <p className="text-xs text-slate-400 mt-1">{famille.Adresse_Complete || famille.Adresse}</p>
+                      )}
+                      <div className="mt-4 flex items-center justify-between gap-2">
+                        {String(famille.Quartier_QVP ?? "").trim()
+                          ? <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-familles-light text-familles-dark">
+                              QVP {String(famille.Quartier_QVP).toUpperCase()}
+                            </span>
+                          : <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-500">Hors QVP</span>
+                        }
+                        <span className="text-xs text-muted">
+                          {membresF.length} membre{membresF.length > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    </Link>
+                  )
+                })}
+              </div>
+              <Pagination
+                page={famillesPagination.page}
+                totalPages={famillesPagination.totalPages}
+                total={famillesPagination.total}
+                pageSize={famillesPagination.pageSize}
+                onPageChange={famillesPagination.setPage}
+                onPageSizeChange={famillesPagination.changePageSize}
+                accentClass="focus:ring-2 focus:ring-familles/30"
+              />
+            </>
           )
       )}
 
@@ -209,7 +224,7 @@ export default function FamillesPage() {
                 </div>
               </div>
               <ul className="divide-y divide-border">
-                {filteredMembres.map(m => {
+                {membresPagination.pageItems.map(m => {
                   const famille = familles.find(f => f.ID_Famille === m.ID_Famille)
                   const statut = m.Statut_Inscription?.toString().toUpperCase() ?? ""
                   return (
@@ -251,6 +266,17 @@ export default function FamillesPage() {
                   )
                 })}
               </ul>
+              <div className="px-5 pb-4">
+                <Pagination
+                  page={membresPagination.page}
+                  totalPages={membresPagination.totalPages}
+                  total={membresPagination.total}
+                  pageSize={membresPagination.pageSize}
+                  onPageChange={membresPagination.setPage}
+                  onPageSizeChange={membresPagination.changePageSize}
+                  accentClass="focus:ring-2 focus:ring-familles/30"
+                />
+              </div>
             </div>
           )
       )}
