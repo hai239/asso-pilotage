@@ -32,6 +32,10 @@ export const POSITIONNEMENT_FOLDER_ID = "1VkfMr7hECZqKeSZhM7eIAbzCQ745yUUZ"
 // Dossier Drive "Communication - Médias" pour les images/vidéos des posts (module CONTENUS)
 export const COMMUNICATION_MEDIA_FOLDER_ID = "1yIGzxLSsdKmdc9N8Zdhkdiz10xdZdKY0"
 
+// Dossier Drive "Bilan atelier" — exports CSV du récapitulatif quantitatif des ateliers
+// (un nouveau fichier horodaté à chaque export, jamais d'écrasement).
+export const BILAN_ATELIER_FOLDER_ID = "1n7eliL5djCRdd65YAHnZm6DACsb-zWGJ"
+
 /** Rend un fichier Drive accessible publiquement (lecture) et retourne son URL de téléchargement direct. */
 export async function makeFilePublic(fileId: string): Promise<string> {
   const drive = getDriveClient()
@@ -151,7 +155,9 @@ export async function appendRow(
     range: sheetName,
     valueInputOption: "USER_ENTERED",
     // Sans ce flag, le mode par défaut ("OVERWRITE") peut mal détecter la fin
-    // du tableau et écraser la dernière ligne (observé sur ASSIDUITE).
+    // du tableau sur certaines feuilles et écraser la dernière ligne écrite
+    // au lieu d'en ajouter une nouvelle (observé sur ASSIDUITE : deux appends
+    // successifs ciblaient la même ligne).
     insertDataOption: "INSERT_ROWS",
     requestBody: { values: [row] },
   })
@@ -225,45 +231,6 @@ export async function deleteRowById(
     },
   })
   return true
-}
-
-// Onglets déjà confirmés existants dans ce process — évite de refaire un
-// spreadsheets.get (metadata complète) à chaque appel une fois le sheet créé.
-const ensuredSheets = new Set<string>()
-
-/** Crée un nouvel onglet avec ses en-têtes s'il n'existe pas déjà (idempotent,
- *  n'écrase jamais un onglet existant). Sert de base pour les nouvelles entités
- *  qui n'ont pas encore de table dans le Sheet (ex : SEANCE). */
-export async function ensureSheet(
-  sheets: Sheets,
-  sheetName: string,
-  headers: string[]
-): Promise<void> {
-  if (ensuredSheets.has(sheetName)) return
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID })
-  if (meta.data.sheets?.some((s) => s.properties?.title === sheetName)) {
-    ensuredSheets.add(sheetName)
-    return
-  }
-  try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
-    })
-  } catch (e) {
-    // Deux requêtes concurrentes peuvent toutes deux constater l'absence de
-    // l'onglet et tenter de le créer ; l'API Sheets rejette la seconde
-    // création ("A sheet with the name ... already exists") — dans ce cas
-    // l'onglet existe bel et bien, on continue normalement.
-    if (!String(e).includes("already exists")) throw e
-  }
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A1`,
-    valueInputOption: "RAW",
-    requestBody: { values: [headers] },
-  })
-  ensuredSheets.add(sheetName)
 }
 
 export async function nextId(sheets: Sheets, sheetName: string): Promise<number> {

@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
-  sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureColumns, ensureSheet,
-  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID,
+  sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureColumns,
+  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, BILAN_ATELIER_FOLDER_ID,
 } from "@/lib/google-sheets-server"
+import { niveauEcole } from "@/lib/atelier"
 
 type Sheets = ReturnType<typeof getSheetsClient>
 
@@ -64,6 +65,8 @@ export async function GET(request: NextRequest) {
         return ok(await getPosts(sheets))
       case "getEvaluations":
         return ok(await getEvaluations(sheets))
+      case "getRecapEleves":
+        return ok({ rows: await computeRecapEleves(sheets) })
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -117,6 +120,7 @@ export async function POST(request: NextRequest) {
       case "updatePost":      return ok(await updatePost(sheets, body.id, body.data))
       case "deletePost":      return ok(await deletePost(sheets, body.id))
       case "uploadPostMedia": return ok(await uploadPostMedia(body))
+      case "exportRecapEleves": return ok(await exportRecapEleves(sheets))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -566,11 +570,9 @@ async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: s
 // ── LECTURE ATELIERS ──────────────────────────────────────
 
 async function getAteliers(sheets: Sheets, audience?: string) {
-  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
-  const [evenements, participants, seances] = await Promise.all([
+  const [evenements, participants] = await Promise.all([
     sheetToObjects(sheets, "EVENEMENT2"),
     sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
-    sheetToObjects(sheets, "SEANCE"),
   ])
   // La table EVENEMENT2 est partagée avec d'autres types d'événements
   // (cours, sortie…) — ce module ne gère que les lignes Type = "atelier".
@@ -579,12 +581,14 @@ async function getAteliers(sheets: Sheets, audience?: string) {
     .filter((a) => !audience || String(a["Audience"]).toLowerCase() === audience.toLowerCase())
     .map((a) => {
       const id = String(a["ID"])
-      // "Atelier ID" d'une séance peut lister plusieurs ateliers (valeurs séparées
-      // par des virgules) — une séance n'est donc pas forcément liée à un seul atelier.
+      // Séances de cet atelier (EVENEMENT2, Type = "séance", "Atelier ID" = parent).
+      // Un·e intervenant·e peut être rattaché·e au niveau séance (ligne
+      // ATELIER_PARTICIPANT avec seulement "Seance ID"), pas seulement au niveau
+      // atelier — on inclut ces liens pour ne pas les masquer.
       const idsSeances = new Set(
-        seances
-          .filter((s) => String(s["Atelier ID"] ?? "").split(",").map((v) => v.trim()).includes(id))
-          .map((s) => String(s["ID"]))
+        evenements
+          .filter((s) => String(s["Type"] ?? "").toLowerCase() === "séance" && String(s["Atelier ID"]) === id)
+          .map((s) => String(s["Séance ID"] ?? s["ID"]))
       )
       const liens = participants.filter((l) =>
         String(l["Atelier ID"]) === id || idsSeances.has(String(l["Seance ID"] ?? ""))
@@ -599,7 +603,7 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         .map((l) => ({
           ID_Intervenant: String(l["Intervenant ID"]),
           Heures: l["Heures"] ?? "",
-          Role: l["Fonction"] ?? "",
+          Role: "",
         }))
       const competences = String(a["Competences ciblees"] ?? "")
         .split(",").map((s) => s.trim()).filter(Boolean)
@@ -607,7 +611,9 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         ID_Atelier: id,
         Categorie: a["Categorie"] ?? "",
         Groupe: a["Groupe"] ?? "",
-        Titre: a["Titre"] ?? "",
+        // Repli sur l'ancienne colonne "Titre" : les ateliers créés avant le
+        // renommage n'ont pas de "Nom atelier" → éviter un titre vide.
+        Titre: a["Nom atelier"] || a["Titre"] || "",
         Audience: a["Audience"] ?? "",
         Date_Debut: fmtDate(a["Date debut"] as string),
         Date_Fin: fmtDate(a["Date fin"] as string),
@@ -1189,7 +1195,7 @@ async function syncAtelierLiens(
     await deleteRowsWhereAll(sheets, "ATELIER_PARTICIPANT", { "Atelier ID": String(idAtelier), "Role": "Intervenant" })
     for (const iid of intervenantIds) {
       const rid = await nextId(sheets, "ATELIER_PARTICIPANT")
-      await appendRow(sheets, "ATELIER_PARTICIPANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Role": "Intervenant", "Heures": "", "Fonction": "" })
+      await appendRow(sheets, "ATELIER_PARTICIPANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Role": "Intervenant", "Heures": "" })
     }
   }
 }
@@ -1201,7 +1207,7 @@ function atelierRow(data: Record<string, unknown>): Record<string, unknown> {
     "Type": "atelier",
     "Categorie": data.Categorie ?? "",
     "Groupe": data.Groupe ?? "",
-    "Titre": data.Titre ?? "",
+    "Nom atelier": data.Titre ?? "",
     "Audience": data.Audience ?? "",
     "Date debut": isoToFr(data.Date_Debut),
     "Date fin": isoToFr(data.Date_Fin),
@@ -1226,8 +1232,11 @@ async function addAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
+  // "Nom atelier" est une colonne nouvelle (ancien nom : "Titre") — la garantir
+  // avant l'écriture, sinon la valeur serait silencieusement ignorée.
+  await ensureColumn(sheets, "EVENEMENT2", "Nom atelier")
   const id = await nextId(sheets, "EVENEMENT2")
-  await appendRow(sheets, "EVENEMENT2", { "ID": id, ...atelierRow(data) })
+  await appendRow(sheets, "EVENEMENT2", { "ID": id, "Atelier ID": id, ...atelierRow(data) })
   await syncAtelierLiens(sheets, id, beneficiaireIds ?? [], intervenantIds ?? [])
   return { ok: true, ID_Atelier: String(id) }
 }
@@ -1239,6 +1248,7 @@ async function updateAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
+  await ensureColumn(sheets, "EVENEMENT2", "Nom atelier")
   const updated = await updateRowById(sheets, "EVENEMENT2", idAtelier, atelierRow(data))
   if (!updated) return { error: "Atelier introuvable" }
   await syncAtelierLiens(sheets, idAtelier, beneficiaireIds, intervenantIds)
@@ -1248,26 +1258,16 @@ async function updateAtelier(
 async function deleteAtelier(sheets: Sheets, idAtelier: string) {
   // Cascade : séances rattachées (+ leurs propres liens intervenants/émargement),
   // puis liens bénéficiaires/intervenants + émargement au niveau de l'atelier entier.
-  // Une séance peut être rattachée à plusieurs ateliers ("Atelier ID" séparés par
-  // virgule) : on ne la supprime (avec ses liens) que si cet atelier était le
-  // dernier auquel elle était rattachée ; sinon on retire juste sa référence.
-  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
-  const seances = await sheetToObjects(sheets, "SEANCE")
-  const idsSeancesADetacher: string[] = []
-  for (const s of seances) {
-    const ids = String(s["Atelier ID"] ?? "").split(",").map((v) => v.trim()).filter(Boolean)
-    if (!ids.includes(idAtelier)) continue
-    const restants = ids.filter((v) => v !== idAtelier)
-    if (restants.length) {
-      await updateRowById(sheets, "SEANCE", String(s["ID"]), { "Atelier ID": restants.join(",") })
-    } else {
-      idsSeancesADetacher.push(String(s["ID"]))
-    }
-  }
-  if (idsSeancesADetacher.length) {
-    await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Seance ID", idsSeancesADetacher)
-    await deleteRowsWhere(sheets, "ASSIDUITE", "Seance ID", idsSeancesADetacher)
-    await deleteRowsWhere(sheets, "SEANCE", "ID", idsSeancesADetacher)
+  // Les séances sont maintenant des lignes EVENEMENT2 (Type = "Séance") dont
+  // "Atelier ID" référence l'atelier parent.
+  const evenements = await sheetToObjects(sheets, "EVENEMENT2")
+  const idsSeances = evenements
+    .filter((s) => String(s["Type"] ?? "").toLowerCase() === "séance" && String(s["Atelier ID"]) === String(idAtelier))
+    .map((s) => String(s["Séance ID"] ?? s["ID"]))
+  if (idsSeances.length) {
+    await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Seance ID", idsSeances)
+    await deleteRowsWhere(sheets, "ASSIDUITE", "Seance ID", idsSeances)
+    await deleteRowsWhere(sheets, "EVENEMENT2", "Séance ID", idsSeances)
   }
   await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Atelier ID", [String(idAtelier)])
   await deleteRowsWhere(sheets, "ASSIDUITE", "Evenement2 ID", [String(idAtelier)])
@@ -1276,41 +1276,41 @@ async function deleteAtelier(sheets: Sheets, idAtelier: string) {
 }
 
 // ── SÉANCE ────────────────────────────────────────────────
-// Une séance est une occurrence précise d'un atelier (une date + un créneau
-// matin/après-midi/journée, avec ses propres horaires, salle et intervenants).
-// Un atelier (EVENEMENT2) reste le programme macro ; SEANCE est la table de
-// détail, nouvelle, créée à la volée via ensureSheet si elle n'existe pas encore.
-
-const SEANCE_HEADERS = ["ID", "Atelier ID", "Date", "Creneau", "Heure Debut", "Heure Fin", "Salle", "Statut"]
+// Une séance est une occurrence précise d'un atelier (une date, ses propres
+// horaires, salle et intervenants). Une séance est une ligne EVENEMENT2 comme
+// un atelier, mais avec Type = "Séance" : "Atelier ID" y référence l'atelier
+// PARENT (contrairement à une ligne atelier où "Atelier ID" est une
+// auto-référence), et "Séance ID" est l'auto-référence de la séance elle-même
+// (utilisée par ATELIER_PARTICIPANT/ASSIDUITE pour s'y rattacher).
 
 /** Reconstruit toujours la ligne complète depuis `data` (même convention que
  *  `atelierRow`) : le formulaire séance doit envoyer l'état complet à chaque
  *  sauvegarde, pas un diff partiel — sinon les champs absents sont effacés. */
-function seanceRow(data: Record<string, unknown>): Record<string, unknown> {
+function seanceRow(id: number, data: Record<string, unknown>): Record<string, unknown> {
   return {
+    "Type": "Séance",
     "Atelier ID": data.ID_Atelier ?? "",
-    "Date": isoToFr(data.Date),
-    "Creneau": data.Creneau ?? "",
-    "Heure Debut": data.Heure_Debut ?? "",
-    "Heure Fin": data.Heure_Fin ?? "",
+    "Séance ID": id,
+    "Nom séance": data.Nom ?? "",
+    "Date debut": isoToFr(data.Date),
+    "Heure debut": data.Heure_Debut ?? "",
+    "Heure fin": data.Heure_Fin ?? "",
+    "Duree": formatMinutes(minutesFromHeures(data.Heure_Debut, data.Heure_Fin)),
     "Salle": data.Salle ?? "",
     "Statut": data.Statut ?? "planifié",
   }
 }
 
 async function getSeances(sheets: Sheets, idAtelier?: string) {
-  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
-  const [seances, participants] = await Promise.all([
-    sheetToObjects(sheets, "SEANCE"),
+  const [evenements, participants] = await Promise.all([
+    sheetToObjects(sheets, "EVENEMENT2"),
     sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
   ])
-  return seances
-    .filter((s) =>
-      !idAtelier ||
-      String(s["Atelier ID"] ?? "").split(",").map((v) => v.trim()).includes(String(idAtelier))
-    )
+  return evenements
+    .filter((s) => String(s["Type"] ?? "").toLowerCase() === "séance")
+    .filter((s) => !idAtelier || String(s["Atelier ID"]) === String(idAtelier))
     .map((s) => {
-      const id = String(s["ID"])
+      const id = String(s["Séance ID"] ?? s["ID"])
       const intervenants = participants
         .filter((l) => l["Role"] === "Intervenant" && String(l["Seance ID"] ?? "") === id)
         .map((l) => ({
@@ -1320,10 +1320,10 @@ async function getSeances(sheets: Sheets, idAtelier?: string) {
       return {
         ID_Seance: id,
         ID_Atelier: String(s["Atelier ID"]),
-        Date: fmtDate(s["Date"] as string),
-        Creneau: s["Creneau"] ?? "",
-        Heure_Debut: s["Heure Debut"] ?? "",
-        Heure_Fin: s["Heure Fin"] ?? "",
+        Nom: s["Nom séance"] ?? "",
+        Date: fmtDate(s["Date debut"] as string),
+        Heure_Debut: s["Heure debut"] ?? "",
+        Heure_Fin: s["Heure fin"] ?? "",
         Salle: s["Salle"] ?? "",
         Statut: s["Statut"] ?? "planifié",
         intervenants,
@@ -1337,7 +1337,6 @@ async function syncSeanceIntervenants(
   idSeance: string | number,
   entries: { ID_Intervenant: string | number; Heures?: string | number }[]
 ) {
-  await ensureColumn(sheets, "ATELIER_PARTICIPANT", "Seance ID")
   await deleteRowsWhereAll(sheets, "ATELIER_PARTICIPANT", { "Seance ID": String(idSeance), "Role": "Intervenant" })
   for (const entry of entries) {
     const rid = await nextId(sheets, "ATELIER_PARTICIPANT")
@@ -1347,7 +1346,6 @@ async function syncSeanceIntervenants(
       "Intervenant ID": entry.ID_Intervenant,
       "Role": "Intervenant",
       "Heures": entry.Heures ?? "",
-      "Fonction": "",
     })
   }
 }
@@ -1357,9 +1355,9 @@ async function addSeance(
   data: Record<string, unknown>,
   intervenants?: { ID_Intervenant: string | number; Heures?: string | number }[],
 ) {
-  await ensureSheet(sheets, "SEANCE", SEANCE_HEADERS)
-  const id = await nextId(sheets, "SEANCE")
-  await appendRow(sheets, "SEANCE", { "ID": id, ...seanceRow(data) })
+  await ensureColumn(sheets, "EVENEMENT2", "Duree")
+  const id = await nextId(sheets, "EVENEMENT2")
+  await appendRow(sheets, "EVENEMENT2", { "ID": id, ...seanceRow(id, data) })
   if (intervenants) await syncSeanceIntervenants(sheets, id, intervenants)
   return { ok: true, ID_Seance: String(id) }
 }
@@ -1370,7 +1368,7 @@ async function updateSeance(
   data: Record<string, unknown>,
   intervenants?: { ID_Intervenant: string | number; Heures?: string | number }[],
 ) {
-  const updated = await updateRowById(sheets, "SEANCE", idSeance, seanceRow(data))
+  const updated = await updateRowById(sheets, "EVENEMENT2", idSeance, seanceRow(Number(idSeance), data))
   if (!updated) return { error: "Séance introuvable" }
   if (intervenants) await syncSeanceIntervenants(sheets, idSeance, intervenants)
   return { ok: true }
@@ -1379,8 +1377,271 @@ async function updateSeance(
 async function deleteSeance(sheets: Sheets, idSeance: string) {
   await deleteRowsWhere(sheets, "ATELIER_PARTICIPANT", "Seance ID", [String(idSeance)])
   await deleteRowsWhere(sheets, "ASSIDUITE", "Seance ID", [String(idSeance)])
-  const deleted = await deleteRowById(sheets, "SEANCE", idSeance)
+  const deleted = await deleteRowById(sheets, "EVENEMENT2", idSeance)
   return deleted ? { ok: true } : { error: "Séance introuvable" }
+}
+
+// ── RÉCAP QUANTITATIF — ATELIERS ÉLÈVES ───────────────────
+// Une ligne = tous les groupes d'un même type d'atelier (Categorie) qui se
+// sont déroulés sur une même période (champ Periode, ex. "Vacances de
+// printemps 2026") — cf. modèle papier fourni par l'association. "Combien de
+// séances" et "durée de chaque séance" supposent une organisation uniforme
+// entre les groupes d'une même période (moyenne arrondie sinon).
+
+interface RecapEleveRow {
+  atelier: string
+  dates: string
+  vacances: string
+  combienDeGroupe: number
+  combienDeSeances: number
+  dureeChaqueSeance: string
+  heuresParEleve: string
+  nElèves: number
+  elementaire6e: number
+  collegeLycee: number
+  nSalaries: number
+  hSalariees: number
+  nStagiaires: number
+  hStagiaires: number
+  nBenevoles: number
+  hBenevoles: number
+}
+
+function average(nums: number[]): number {
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0
+}
+
+function parseHeures(v: unknown): number {
+  const n = Number(String(v ?? "").replace(",", "."))
+  return isNaN(n) ? 0 : n
+}
+
+/** "2025-10-20" → "25-26" (même convention que getCurrentAnneeScolaire côté
+ *  client : l'année scolaire commence en juillet). */
+function anneeScolaireFromIso(iso: string): string {
+  const [y, m] = iso.split("-").map(Number)
+  if (!y || !m) return ""
+  const baseYear = m >= 7 ? y : y - 1
+  return `${String(baseYear % 100).padStart(2, "0")}-${String((baseYear + 1) % 100).padStart(2, "0")}`
+}
+
+function minutesFromHeures(heureDebut: unknown, heureFin: unknown): number {
+  const [h1, m1] = String(heureDebut ?? "").split(":").map(Number)
+  const [h2, m2] = String(heureFin ?? "").split(":").map(Number)
+  if ([h1, m1, h2, m2].some((n) => isNaN(n))) return 0
+  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
+  return mins > 0 ? mins : 0
+}
+
+function formatMinutes(mins: number): string {
+  if (mins <= 0) return ""
+  const rounded = Math.round(mins)
+  const h = Math.floor(rounded / 60)
+  const m = rounded % 60
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
+}
+
+async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
+  const [evenements, participants, intervenantsRaw, personnes, inscriptions, assiduite] = await Promise.all([
+    sheetToObjects(sheets, "EVENEMENT2"),
+    sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
+    sheetToObjects(sheets, "INTERVENANT"),
+    sheetToObjects(sheets, "PERSONNE"),
+    sheetToObjects(sheets, "INSCRIPTION"),
+    sheetToObjects(sheets, "ASSIDUITE"),
+  ])
+
+  // "Audience" vaut "Eleve"/"Parent" (singulier) dans le Sheet — même convention
+  // de détection que côté client (app/ateliers/page.tsx) : tout ce qui ne
+  // commence pas par "parent" est un atelier élève.
+  const ateliers = evenements.filter((a) =>
+    String(a["Type"] ?? "").toLowerCase() === "atelier" &&
+    !String(a["Audience"] ?? "").toLowerCase().startsWith("parent")
+  )
+  // Les séances sont des lignes EVENEMENT2 (Type = "Séance") dont "Atelier ID"
+  // référence l'atelier parent (voir seanceRow()/getSeances plus haut).
+  const seances = evenements.filter((s) => String(s["Type"] ?? "").toLowerCase() === "séance")
+
+  // Regroupement par (Categorie, Periode).
+  const groupes = new Map<string, { categorie: string; periode: string; ateliers: Record<string, unknown>[] }>()
+  for (const a of ateliers) {
+    const categorie = String(a["Categorie"] ?? "").trim() || "(sans catégorie)"
+    const periode = String(a["Periode"] ?? "").trim()
+    const key = `${categorie}‖${periode}`
+    if (!groupes.has(key)) groupes.set(key, { categorie, periode, ateliers: [] })
+    groupes.get(key)!.ateliers.push(a)
+  }
+
+  const intervenantTypeById = new Map(intervenantsRaw.map((i) => [String(i["ID"]), String(i["Type"] ?? "")]))
+  const inscriptionsByPersonne = new Map<string, Record<string, unknown>[]>()
+  for (const p of personnes) {
+    const id = String(p["ID"])
+    inscriptionsByPersonne.set(id, inscriptions.filter((i) => String(i["Personne ID"]) === id))
+  }
+  /** Le niveau/classe d'un élève est propre à une année scolaire (une nouvelle
+   *  ligne INSCRIPTION est créée à chaque réinscription) — un élève peut donc
+   *  changer de classe d'une année sur l'autre. On prend le "Niveau / Classe"
+   *  de l'année scolaire DE L'ATELIER concerné, pas la classe actuelle de
+   *  l'élève, sinon un atelier passé serait reclassé avec sa classe la plus
+   *  récente. Si aucune inscription ne correspond à cette année précise
+   *  (donnée manquante), on retombe sur l'inscription la plus récente connue. */
+  function niveauClasseAt(personneId: string, anneeScolaire: string): string {
+    const insc = inscriptionsByPersonne.get(personneId) ?? []
+    const exact = insc.find((i) => String(i["Annee scolaire"] ?? "").trim() === anneeScolaire)
+    const retenue = exact ?? inscriptionCourante(insc)
+    return retenue ? String(retenue["Niveau / Classe"] ?? "") : ""
+  }
+
+  function heuresParType(seanceIds: string[], type: string): { count: number; heures: number } {
+    const ids = new Set<string>()
+    let heures = 0
+    for (const l of participants) {
+      if (l["Role"] !== "Intervenant") continue
+      if (!seanceIds.includes(String(l["Seance ID"] ?? ""))) continue
+      const iid = String(l["Intervenant ID"])
+      if (intervenantTypeById.get(iid) !== type) continue
+      ids.add(iid)
+      heures += parseHeures(l["Heures"])
+    }
+    return { count: ids.size, heures }
+  }
+
+  /** Heures effectivement suivies par un élève sur les séances d'un atelier :
+   *  on part du principe qu'un élève d'un groupe assiste à toutes les séances
+   *  de son atelier, sauf celles où ASSIDUITE le marque explicitement absent/
+   *  excusé pour cette séance précise (pas de ligne ASSIDUITE = présent par
+   *  défaut, cf. décision produit). */
+  function heuresEleve(personneId: string, seancesAtelier: Record<string, unknown>[]): number {
+    let total = 0
+    for (const s of seancesAtelier) {
+      const sid = String(s["Séance ID"] ?? s["ID"])
+      const presence = assiduite.find((a) => String(a["Personne ID"]) === personneId && String(a["Seance ID"] ?? "") === sid)
+      const etat = String(presence?.["ETAT"] ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      if (presence && etat !== "present") continue
+      total += minutesFromHeures(s["Heure debut"], s["Heure fin"])
+    }
+    return total
+  }
+
+  const rows: (RecapEleveRow & { _dateTri: string })[] = []
+  for (const { categorie, periode, ateliers: groupe } of groupes.values()) {
+    const atelierIds = groupe.map((a) => String(a["ID"]))
+    const seancesGroupe = seances.filter((s) => atelierIds.includes(String(s["Atelier ID"])))
+    const seanceIds = seancesGroupe.map((s) => String(s["Séance ID"] ?? s["ID"]))
+
+    const datesIso = groupe
+      .flatMap((a) => [parseDateFr(String(a["Date debut"] ?? "")), parseDateFr(String(a["Date fin"] ?? ""))])
+      .filter(Boolean)
+    const dateDebutMin = datesIso.length ? datesIso.reduce((a, b) => (a < b ? a : b)) : ""
+    const dateFinMax = datesIso.length ? datesIso.reduce((a, b) => (a > b ? a : b)) : ""
+    const datesLabel = dateDebutMin
+      ? (dateFinMax && dateFinMax !== dateDebutMin ? `${fmtDateFr(dateDebutMin)} – ${fmtDateFr(dateFinMax)}` : fmtDateFr(dateDebutMin))
+      : ""
+
+    const nbSeancesParAtelier = atelierIds.map((id) => seances.filter((s) => String(s["Atelier ID"]) === id).length)
+    const nbSeancesMoyen = Math.round(average(nbSeancesParAtelier))
+
+    const dureesMinutes = seancesGroupe
+      .map((s) => minutesFromHeures(s["Heure debut"], s["Heure fin"]))
+      .filter((m) => m > 0)
+    const dureeMoyenneMin = average(dureesMinutes)
+
+    const beneficiaireIds = new Set(
+      participants
+        .filter((l) => l["Role"] === "Beneficiaire" && atelierIds.includes(String(l["Atelier ID"] ?? "")))
+        .map((l) => String(l["Personne ID"]))
+    )
+    const anneeScolaireGroupe = anneeScolaireFromIso(dateDebutMin)
+    let elementaire6e = 0, collegeLycee = 0
+    for (const pid of beneficiaireIds) {
+      const niveau = niveauEcole(niveauClasseAt(pid, anneeScolaireGroupe))
+      if (niveau === "elementaire" || niveau === "6e") elementaire6e++
+      else if (niveau === "college" || niveau === "lycee") collegeLycee++
+    }
+
+    // Heures/élève : moyenne, sur tous les élèves de tous les ateliers (groupes)
+    // du bucket, de leurs heures réellement suivies (séances de LEUR atelier,
+    // absences déduites) — pas une estimation uniforme du bucket entier.
+    const heuresParEleveIndiv: number[] = []
+    for (const a of groupe) {
+      const aid = String(a["ID"])
+      const seancesAtelier = seances.filter((s) => String(s["Atelier ID"]) === aid)
+      const elevesAtelier = participants
+        .filter((l) => l["Role"] === "Beneficiaire" && String(l["Atelier ID"] ?? "") === aid)
+        .map((l) => String(l["Personne ID"]))
+      for (const pid of elevesAtelier) heuresParEleveIndiv.push(heuresEleve(pid, seancesAtelier))
+    }
+
+    const salaries = heuresParType(seanceIds, "Salarié·e")
+    const stagiaires = heuresParType(seanceIds, "Stagiaire")
+    const benevoles = heuresParType(seanceIds, "Bénévole")
+
+    rows.push({
+      atelier: categorie,
+      dates: datesLabel,
+      vacances: periode,
+      combienDeGroupe: atelierIds.length,
+      combienDeSeances: nbSeancesMoyen,
+      dureeChaqueSeance: formatMinutes(dureeMoyenneMin),
+      heuresParEleve: formatMinutes(average(heuresParEleveIndiv)),
+      nElèves: beneficiaireIds.size,
+      elementaire6e,
+      collegeLycee,
+      nSalaries: salaries.count,
+      hSalariees: salaries.heures,
+      nStagiaires: stagiaires.count,
+      hStagiaires: stagiaires.heures,
+      nBenevoles: benevoles.count,
+      hBenevoles: benevoles.heures,
+      _dateTri: dateDebutMin,
+    })
+  }
+
+  return rows
+    .sort((a, b) => b._dateTri.localeCompare(a._dateTri) || a.atelier.localeCompare(b.atelier))
+    .map(({ _dateTri, ...r }) => r)
+}
+
+/** "1989-03-14" → "14/03/1989". */
+function fmtDateFr(iso: string): string {
+  const [y, m, d] = iso.split("-")
+  return d && m && y ? `${d}/${m}/${y}` : iso
+}
+
+const RECAP_ELEVES_HEADERS = [
+  "atelier", "dates de l'atelier", "vacances", "combien de groupe", "combien de séances",
+  "durée de chaque séance", "combien d'heures par élève", "n d'élèves", "élémentaires-6e",
+  "collège-lycée", "n de salariés impliqués", "n d'heures salariées", "n de stagiaires impliqués",
+  "n d'heures stagiaires", "n bénévoles impliqués", "n d'heures total bénévol",
+]
+
+function toCsvValue(v: string | number): string {
+  const s = String(v ?? "")
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function recapEleveToCsvRow(r: RecapEleveRow): (string | number)[] {
+  return [
+    r.atelier, r.dates, r.vacances, r.combienDeGroupe, r.combienDeSeances,
+    r.dureeChaqueSeance, r.heuresParEleve, r.nElèves, r.elementaire6e,
+    r.collegeLycee, r.nSalaries, r.hSalariees, r.nStagiaires,
+    r.hStagiaires, r.nBenevoles, r.hBenevoles,
+  ]
+}
+
+async function exportRecapEleves(sheets: Sheets) {
+  const rows = await computeRecapEleves(sheets)
+  const lines = [RECAP_ELEVES_HEADERS, ...rows.map(recapEleveToCsvRow)]
+    .map((line) => line.map(toCsvValue).join(";"))
+  const csv = "﻿" + lines.join("\r\n") // BOM : Excel doit lire les accents en UTF-8
+  const base64 = Buffer.from(csv, "utf8").toString("base64")
+
+  const horodatage = new Date().toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
+    .replace(/\//g, "-").replace(":", "h").replace(", ", " ")
+  const nomFichier = `Récap élèves - ${horodatage}.csv`
+
+  const { url } = await uploadToDrive(nomFichier, "text/csv", base64, BILAN_ATELIER_FOLDER_ID)
+  return { ok: true, url, nomFichier }
 }
 
 // ── Helpers mapping ───────────────────────────────────────
