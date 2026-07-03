@@ -71,6 +71,10 @@ export async function GET(request: NextRequest) {
         return ok(await getEtablissements(sheets))
       case "getProfesseurs":
         return ok(await getProfesseurs(sheets, searchParams.get("idEtab") ?? ""))
+      case "getEtablissementsAvecStats":
+        return ok(await getEtablissementsAvecStats(sheets))
+      case "getEtablissementDetail":
+        return ok(await getEtablissementDetail(sheets, searchParams.get("idEtab")!))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -118,9 +122,11 @@ export async function POST(request: NextRequest) {
       case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
       case "upsertEvaluation":  return ok(await upsertEvaluation(sheets, String(body.idPersonne), body.session, body.data))
       case "deleteEvaluation":  return ok(await deleteEvaluation(sheets, body.idEvaluation))
-      case "addEtablissement": return ok(await addEtablissement(sheets, body.data))
-      case "addProfesseur":    return ok(await addProfesseur(sheets, body.data))
-      case "addScolarite":     return ok(await addScolariteEntry(sheets, body))
+      case "addEtablissement":    return ok(await addEtablissement(sheets, body.data))
+      case "deleteEtablissement": return ok(await deleteEtablissement(sheets, body.idEtab))
+      case "addProfesseur":       return ok(await addProfesseur(sheets, body.data))
+      case "deleteProfesseur":    return ok(await deleteProfesseur(sheets, body.idProf))
+      case "addScolarite":        return ok(await addScolariteEntry(sheets, body))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
       case "addPost":         return ok(await addPost(sheets, body.data))
@@ -1732,6 +1738,111 @@ async function addProfesseur(sheets: Sheets, data: Record<string, unknown>) {
     "Email": data.Email ?? "", "Etablissement ID": data.Etablissement_ID ?? "",
   })
   return { ok: true, ID: String(id) }
+}
+
+async function getEtablissementsAvecStats(sheets: Sheets) {
+  const [etabs, profs, scolarites, personnes] = await Promise.all([
+    sheetToObjects(sheets, "ETABLISSEMENT"),
+    sheetToObjects(sheets, "PROFESSEUR"),
+    sheetToObjects(sheets, "SCOLARITE"),
+    sheetToObjects(sheets, "PERSONNE"),
+  ])
+  return etabs.map(e => {
+    const idEtab = String(e["ID"])
+    const scolEtab = scolarites.filter(s => String(s["Etablissement ID"]) === idEtab)
+    const idsEnfants = new Set(scolEtab.map(s => String(s["Personne ID"])))
+    const idsFamilles = new Set(
+      personnes.filter(p => idsEnfants.has(String(p["ID"]))).map(p => String(p["Famille ID"]))
+    )
+    const nbAdultes = personnes.filter(
+      p => idsFamilles.has(String(p["Famille ID"])) && String(p["Categorie"]) !== "Enfant"
+    ).length
+    const nbProfs = profs.filter(p => String(p["Etablissement ID"]) === idEtab).length
+    return {
+      ID: idEtab,
+      Type: String(e["Type"] ?? ""),
+      Nom: String(e["Nom"] ?? ""),
+      nb_enfants: idsEnfants.size,
+      nb_adultes: nbAdultes,
+      nb_professeurs: nbProfs,
+    }
+  })
+}
+
+async function getEtablissementDetail(sheets: Sheets, idEtab: string) {
+  const [etabs, profs, scolarites, personnes, inscriptions] = await Promise.all([
+    sheetToObjects(sheets, "ETABLISSEMENT"),
+    sheetToObjects(sheets, "PROFESSEUR"),
+    sheetToObjects(sheets, "SCOLARITE"),
+    sheetToObjects(sheets, "PERSONNE"),
+    sheetToObjects(sheets, "INSCRIPTION"),
+  ])
+  const etab = etabs.find(e => String(e["ID"]) === idEtab)
+  const profById = new Map(profs.map(p => [String(p["ID"]), p]))
+  const scolEtab = scolarites.filter(s => String(s["Etablissement ID"]) === idEtab)
+  const eleves = scolEtab.map(sc => {
+    const p = personnes.find(x => String(x["ID"]) === String(sc["Personne ID"]))
+    const prof = profById.get(String(sc["Prof principal ID"] ?? ""))
+    const insc = inscriptions.filter(i => String(i["Personne ID"]) === String(sc["Personne ID"]))
+    const dernInsc = insc.length > 0 ? insc[insc.length - 1] : null
+    return {
+      ID_Membre: String(sc["Personne ID"]),
+      ID_Famille: String(p?.["Famille ID"] ?? ""),
+      Nom: String(p?.["Nom"] ?? ""),
+      Prenom: String(p?.["Prenom"] ?? ""),
+      Niveau: String(dernInsc?.["Niveau / Classe"] ?? ""),
+      ProfPrincipal: prof ? {
+        Nom: String(prof["Nom"] ?? ""),
+        Telephone: String(prof["Telephone"] ?? ""),
+        Email: String(prof["Email"] ?? ""),
+      } : null,
+    }
+  })
+  const professeurs = profs
+    .filter(p => String(p["Etablissement ID"]) === idEtab)
+    .map(p => ({
+      ID: String(p["ID"]),
+      Nom: String(p["Nom"] ?? ""),
+      Telephone: String(p["Telephone"] ?? ""),
+      Email: String(p["Email"] ?? ""),
+    }))
+  return {
+    ID: idEtab,
+    Type: String(etab?.["Type"] ?? ""),
+    Nom: String(etab?.["Nom"] ?? ""),
+    eleves,
+    professeurs,
+  }
+}
+
+async function deleteEtablissement(sheets: Sheets, idEtab: string) {
+  // Cascade : nettoie les références à cet établissement dans PROFESSEUR et SCOLARITE
+  // avant de supprimer la ligne ETABLISSEMENT elle-même.
+  // PROFESSEUR : supprime les profs liés (ils n'ont pas de sens sans établissement)
+  await deleteRowsWhere(sheets, "PROFESSEUR", "Etablissement ID", [String(idEtab)])
+  // SCOLARITE : efface l'établissement et le prof principal sur les lignes qui le référencent
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  for (const sc of scolarites) {
+    if (String(sc["Etablissement ID"]) === String(idEtab)) {
+      await updateRowById(sheets, "SCOLARITE", String(sc["ID"]), {
+        "Etablissement ID": "", "Prof principal ID": "",
+      })
+    }
+  }
+  const deleted = await deleteRowById(sheets, "ETABLISSEMENT", idEtab)
+  return deleted ? { ok: true } : { error: "Établissement introuvable" }
+}
+
+async function deleteProfesseur(sheets: Sheets, idProf: string) {
+  // Cascade : efface la référence au prof dans toutes les lignes SCOLARITE qui le mentionnent
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  for (const sc of scolarites) {
+    if (String(sc["Prof principal ID"]) === String(idProf)) {
+      await updateRowById(sheets, "SCOLARITE", String(sc["ID"]), { "Prof principal ID": "" })
+    }
+  }
+  const deleted = await deleteRowById(sheets, "PROFESSEUR", idProf)
+  return deleted ? { ok: true } : { error: "Professeur introuvable" }
 }
 
 async function addScolariteEntry(sheets: Sheets, body: Record<string, unknown>) {

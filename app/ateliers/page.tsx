@@ -29,7 +29,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, Sparkles, Shuffle,
-  ChevronDown, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
+  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,

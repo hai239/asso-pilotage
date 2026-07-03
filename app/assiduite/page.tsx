@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import {
-  BarChart2, AlertTriangle, Users, CheckCircle,
+  BarChart2, AlertTriangle, CheckCircle,
   Clock, GraduationCap, CalendarDays, ChevronDown, Search, X,
 } from "lucide-react"
 
@@ -43,44 +43,10 @@ interface StudentStats {
   tauxPresence: number
 }
 
-interface GroupStats {
-  nom: string
-  eleves: number
-  presents: number
-  absents: number
-  seancesTotal: number
-  tauxPresence: number
-  alertes: number
-}
-
 // ──────────────────────────────────────────────
 // Constants
 // ──────────────────────────────────────────────
 const SEUIL_ALERTE = 3
-
-const GROUPES = ["Débutants", "Intermédiaires", "Avancées"]
-
-// Regroupe les niveaux réels du Sheet (FLE : Alpha/A1/A2/B1… ; classes
-// scolaires : CP…Terminale) dans les 3 grands groupes d'affichage.
-function niveauToGroupe(niveau: string): string {
-  const n = (niveau ?? "").toLowerCase()
-  if (/alpha|a1/.test(n)) return "Débutants"
-  if (/a2/.test(n)) return "Intermédiaires"
-  if (/b1|b2|c1|c2/.test(n)) return "Avancées"
-  if (/cp|ce1|ce2|cm1|cm2/.test(n)) return "Débutants"
-  if (/6eme|5eme|4eme|3eme|6e|5e|4e|3e/.test(n)) return "Intermédiaires"
-  if (/2nde|seconde|1ere|premiere|terminale|cap/.test(n)) return "Avancées"
-  if (/débutant|debutant/.test(n)) return "Débutants"
-  if (/intermédiaire|intermediaire/.test(n)) return "Intermédiaires"
-  if (/avancé|avance/.test(n)) return "Avancées"
-  return niveau || "—"
-}
-
-const GROUPE_COLORS: Record<string, { bg: string; text: string; border: string; bar: string }> = {
-  "Débutants":      { bg: "bg-ateliers-light",      text: "text-ateliers-dark",      border: "border-ateliers/20",      bar: "bg-ateliers" },
-  "Intermédiaires": { bg: "bg-communication-light",  text: "text-communication-dark",  border: "border-communication/20",  bar: "bg-communication" },
-  "Avancées":       { bg: "bg-finances-light",        text: "text-finances-dark",        border: "border-finances/20",        bar: "bg-finances" },
-}
 
 const PERIODE_LABELS: Record<Periode, string> = {
   tout:    "Toute la période",
@@ -228,26 +194,6 @@ export default function AssiduiteePage() {
   const globalAbsents  = studentStats.reduce((acc, s) => acc + s.absents, 0)
   const tauxGlobal     = globalTotal > 0 ? Math.round((globalPresents / globalTotal) * 100) : 0
 
-  // Stats par groupe
-  const groupStats = useMemo((): GroupStats[] => {
-    return GROUPES.map(g => {
-      const members  = studentStats.filter(s => niveauToGroupe(s.benef.niveau) === g)
-      const total    = members.reduce((acc, s) => acc + s.seances, 0)
-      const presents = members.reduce((acc, s) => acc + s.presents, 0)
-      const absents  = members.reduce((acc, s) => acc + s.absents, 0)
-      const taux     = total > 0 ? Math.round((presents / total) * 100) : 0
-      return {
-        nom: g,
-        eleves:       members.length,
-        seancesTotal: total,
-        presents,
-        absents,
-        tauxPresence: taux,
-        alertes:      members.filter(s => s.absents >= SEUIL_ALERTE).length,
-      }
-    })
-  }, [studentStats])
-
   return (
     <div className="p-8 max-w-6xl mx-auto">
       {/* En-tête */}
@@ -259,7 +205,7 @@ export default function AssiduiteePage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">Hub Assiduité</h1>
             <p className="text-sm text-muted mt-0.5">
-              Taux de présence · Alertes décrochage · Vue par groupe et par élève
+              Taux de présence · Alertes décrochage · Détail par élève
             </p>
           </div>
         </div>
@@ -356,9 +302,6 @@ export default function AssiduiteePage() {
                     <span className="inline-flex items-center gap-1 bg-alert text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
                       <AlertTriangle size={9} /> ALERTE
                     </span>
-                    <span className="text-xs text-muted truncate">
-                      {niveauToGroupe(s.benef.niveau)}
-                    </span>
                   </div>
                   <p className="font-semibold text-foreground">{s.benef.prenom} {s.benef.nom}</p>
                   <p className="text-xs text-muted mt-0.5">
@@ -378,9 +321,6 @@ export default function AssiduiteePage() {
                     <span className="inline-flex items-center gap-1 bg-absences text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
                       <Clock size={9} /> RISQUE
                     </span>
-                    <span className="text-xs text-muted truncate">
-                      {niveauToGroupe(s.benef.niveau)}
-                    </span>
                   </div>
                   <p className="font-semibold text-foreground">{s.benef.prenom} {s.benef.nom}</p>
                   <p className="text-xs text-absences-dark/70 mt-0.5">
@@ -396,53 +336,6 @@ export default function AssiduiteePage() {
           </div>
         </section>
       )}
-
-      {/* Vue par groupe */}
-      <section className="mb-8">
-        <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-          <Users size={13} />
-          Vue par groupe
-        </h2>
-        <div className="grid grid-cols-3 gap-4">
-          {groupStats.map(g => {
-            const c = GROUPE_COLORS[g.nom] ?? { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200", bar: "bg-slate-400" }
-            return (
-              <div key={g.nom} className={`rounded-xl border p-5 ${c.bg} ${c.border}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className={`font-semibold text-sm ${c.text}`}>{g.nom}</h3>
-                  {g.alertes > 0 && (
-                    <span className="flex items-center gap-0.5 text-xs font-bold text-alert">
-                      <AlertTriangle size={11} /> {g.alertes} alerte{g.alertes > 1 ? "s" : ""}
-                    </span>
-                  )}
-                </div>
-                <p className={`text-4xl font-bold ${c.text} mb-0.5`}>{g.tauxPresence}%</p>
-                <p className={`text-xs ${c.text} opacity-60 mb-3`}>taux de présence</p>
-                <div className="h-1.5 rounded-full bg-white/60 mb-4 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${c.bar} transition-all`}
-                    style={{ width: `${g.tauxPresence}%` }}
-                  />
-                </div>
-                <div className={`grid grid-cols-3 gap-2 text-center ${c.text}`}>
-                  <div>
-                    <p className="font-bold text-sm">{g.eleves}</p>
-                    <p className="text-[10px] opacity-60">élèves</p>
-                  </div>
-                  <div>
-                    <p className="font-bold text-sm">{g.presents}</p>
-                    <p className="text-[10px] opacity-60">présences</p>
-                  </div>
-                  <div>
-                    <p className="font-bold text-sm">{g.absents}</p>
-                    <p className="text-[10px] opacity-60">absences</p>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
 
       {/* Tableau détaillé par élève */}
       <section>
@@ -487,7 +380,6 @@ export default function AssiduiteePage() {
                     <ChevronDown size={11} className={`transition-transform ${sortKey === "nom" && sortDir === "desc" ? "rotate-180" : ""} ${sortKey !== "nom" ? "opacity-30" : ""}`} />
                   </button>
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Groupe</th>
                 {/* Séances */}
                 <th className="text-center px-4 py-3">
                   <button
@@ -525,10 +417,8 @@ export default function AssiduiteePage() {
             </thead>
             <tbody className="divide-y divide-border">
               {displayedStats.map(s => {
-                const alerte      = s.absents >= SEUIL_ALERTE
-                const enRisque    = s.absents === SEUIL_ALERTE - 1
-                const groupeLabel = niveauToGroupe(s.benef.niveau)
-                const gc          = GROUPE_COLORS[groupeLabel]
+                const alerte   = s.absents >= SEUIL_ALERTE
+                const enRisque = s.absents === SEUIL_ALERTE - 1
                 return (
                   <tr
                     key={s.benef.id}
@@ -556,16 +446,6 @@ export default function AssiduiteePage() {
                           )}
                         </div>
                       </div>
-                    </td>
-                    {/* Groupe */}
-                    <td className="px-4 py-3.5">
-                      {gc ? (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${gc.bg} ${gc.text}`}>
-                          {groupeLabel}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted">{groupeLabel}</span>
-                      )}
                     </td>
                     <td className="px-4 py-3.5 text-center text-sm text-muted">{s.seances}</td>
                     <td className="px-4 py-3.5 text-center">
@@ -613,7 +493,7 @@ export default function AssiduiteePage() {
               })}
               {displayedStats.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-10 text-center text-sm text-muted italic">
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-muted italic">
                     {search.trim()
                       ? `Aucun élève ne correspond à « ${search.trim()} ».`
                       : "Aucune donnée pour cette période."}
