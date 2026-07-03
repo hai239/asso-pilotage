@@ -3,13 +3,18 @@
 import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Search, Plus } from "lucide-react"
-import SlideOver, { Field, Input, FormRow, SaveButton } from "@/components/SlideOver"
+import { Search, Plus, X } from "lucide-react"
+import SlideOver, { Field, Input, Select, FormRow, SaveButton } from "@/components/SlideOver"
 import AdresseAutocomplete from "@/components/AdresseAutocomplete"
 import Pagination, { usePagination } from "@/components/Pagination"
-import { fetchFamilles, fetchMembres, addFamille, isApiConfigured, type FamilleSheet, type MembreSheet } from "@/lib/sheets-api"
+import {
+  fetchFamilles, fetchMembres, addFamille, fetchEtablissementsAvecStats, addEtablissement, deleteEtablissement,
+  isApiConfigured,
+  type FamilleSheet, type MembreSheet, type EtablissementStats,
+} from "@/lib/sheets-api"
+import { GraduationCap } from "lucide-react"
 
-type Onglet = "familles" | "membres"
+type Onglet = "familles" | "membres" | "etablissements"
 
 const niveauStyle: Record<string, string> = {
   "Alpha":   "bg-slate-100 text-slate-600",
@@ -27,24 +32,29 @@ const statutStyle: Record<string, string> = {
 }
 
 const emptyForm = { Nom_Famille: "", Adresse: "", Code_Postal: "", Ville: "", Quartier_QVP: "" }
+const emptyEtabForm = { Type: "École", Nom: "" }
 
 export default function FamillesPage() {
   const router = useRouter()
-  const [onglet, setOnglet]       = useState<Onglet>("familles")
-  const [familles, setFamilles]   = useState<FamilleSheet[]>([])
-  const [membres, setMembres]     = useState<MembreSheet[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [search, setSearch]       = useState("")
-  const [slideOpen, setSlideOpen] = useState(false)
-  const [form, setForm]           = useState(emptyForm)
+  const [onglet, setOnglet]           = useState<Onglet>("familles")
+  const [familles, setFamilles]       = useState<FamilleSheet[]>([])
+  const [membres, setMembres]         = useState<MembreSheet[]>([])
+  const [etablissements, setEtablissements] = useState<EtablissementStats[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [search, setSearch]           = useState("")
+  const [slideOpen, setSlideOpen]     = useState(false)
+  const [slideEtabOpen, setSlideEtabOpen] = useState(false)
+  const [form, setForm]               = useState(emptyForm)
+  const [etabForm, setEtabForm]       = useState(emptyEtabForm)
   const apiOk = isApiConfigured()
 
   const loadData = useCallback(async () => {
     if (!apiOk) { setLoading(false); return }
     try {
-      const [f, m] = await Promise.all([fetchFamilles(), fetchMembres()])
+      const [f, m, e] = await Promise.all([fetchFamilles(), fetchMembres(), fetchEtablissementsAvecStats()])
       setFamilles(f)
       setMembres(m)
+      setEtablissements(e)
     } catch (e) {
       console.error(e)
     } finally {
@@ -54,6 +64,19 @@ export default function FamillesPage() {
 
   useEffect(() => { loadData() }, [loadData])
   function switchOnglet(o: Onglet) { setOnglet(o); setSearch("") }
+
+  async function handleDeleteEtablissement(id: string, nom: string) {
+    if (!confirm(`Supprimer "${nom}" ? Cette action est irréversible et retirera aussi tous ses professeurs et les références dans la scolarité des élèves.`)) return
+    await deleteEtablissement(id)
+    await loadData()
+  }
+
+  async function handleSaveEtablissement() {
+    await addEtablissement({ Type: etabForm.Type, Nom: etabForm.Nom })
+    setEtabForm(emptyEtabForm)
+    setSlideEtabOpen(false)
+    await loadData()
+  }
 
   async function handleSaveFamille() {
     const res = await addFamille({ Nom_Famille: form.Nom_Famille, Adresse: form.Adresse, Code_Postal: form.Code_Postal, Ville: form.Ville, Quartier_QVP: form.Quartier_QVP })
@@ -84,8 +107,9 @@ export default function FamillesPage() {
   const membresPagination  = usePagination(filteredMembres, "asso-familles-membres-page-size")
 
   const tabs = [
-    { key: "familles" as Onglet, label: "Familles", count: familles.length },
-    { key: "membres"  as Onglet, label: "Membres",  count: membres.length },
+    { key: "familles"       as Onglet, label: "Familles",        count: familles.length },
+    { key: "membres"        as Onglet, label: "Membres",         count: membres.length },
+    { key: "etablissements" as Onglet, label: "Établissements",  count: etablissements.length },
   ]
 
   if (!apiOk) return (
@@ -127,6 +151,15 @@ export default function FamillesPage() {
             Ajouter une famille
           </button>
         )}
+        {onglet === "etablissements" && (
+          <button
+            onClick={() => { setEtabForm(emptyEtabForm); setSlideEtabOpen(true) }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-familles text-white text-sm font-medium hover:bg-familles-dark transition-colors shrink-0"
+          >
+            <Plus size={14} />
+            Ajouter un établissement
+          </button>
+        )}
       </div>
 
       {/* Onglets + recherche */}
@@ -152,17 +185,19 @@ export default function FamillesPage() {
           ))}
         </div>
 
-        <div className="relative w-72">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            type="text"
-            aria-label={onglet === "familles" ? "Rechercher par nom de famille" : "Rechercher un membre"}
-            placeholder={onglet === "familles" ? "Rechercher par nom de famille…" : "Rechercher un membre…"}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-familles/30 focus:border-familles"
-          />
-        </div>
+        {onglet !== "etablissements" && (
+          <div className="relative w-72">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              type="text"
+              aria-label={onglet === "familles" ? "Rechercher par nom de famille" : "Rechercher un membre"}
+              placeholder={onglet === "familles" ? "Rechercher par nom de famille…" : "Rechercher un membre…"}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-familles/30 focus:border-familles"
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Onglet Familles ── */}
@@ -288,6 +323,65 @@ export default function FamillesPage() {
           )
       )}
 
+      {/* ── Onglet Établissements ── */}
+      {onglet === "etablissements" && (() => {
+        const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+        const types = [
+          { label: "École",   key: "ecole" },
+          { label: "Collège", key: "college" },
+          { label: "Lycée",   key: "lycee" },
+        ]
+        return (
+          <div className="flex flex-col gap-8">
+            {types.map(type => {
+              const etabsDuType = etablissements.filter(e => norm(e.Type) === type.key)
+              return (
+                <div key={type.label}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <GraduationCap size={16} className="text-familles-dark" />
+                    <h2 className="text-sm font-semibold text-foreground">{type.label}</h2>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-familles-light text-familles-dark font-medium">{etabsDuType.length}</span>
+                  </div>
+                  {etabsDuType.length === 0
+                    ? <p className="text-sm text-muted italic">Aucun établissement de ce type.</p>
+                    : (
+                      <div className="bg-surface border border-border rounded-xl overflow-hidden">
+                        <ul className="divide-y divide-border">
+                          {etabsDuType.map(e => (
+                            <li key={e.ID} className="flex items-center">
+                              <Link
+                                href={`/etablissements/${e.ID}`}
+                                className="flex-1 px-5 py-4 flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
+                              >
+                                <span className="font-semibold text-foreground">{e.Nom}</span>
+                                <div className="flex items-center gap-3 text-xs text-muted shrink-0">
+                                  <span><span className="font-semibold text-foreground">{e.nb_enfants}</span> élève{e.nb_enfants !== 1 ? "s" : ""}</span>
+                                  <span className="text-border">·</span>
+                                  <span><span className="font-semibold text-foreground">{e.nb_adultes}</span> adulte{e.nb_adultes !== 1 ? "s" : ""}</span>
+                                  <span className="text-border">·</span>
+                                  <span><span className="font-semibold text-foreground">{e.nb_professeurs}</span> prof{e.nb_professeurs !== 1 ? "s" : ""}</span>
+                                </div>
+                              </Link>
+                              <button
+                                onClick={() => handleDeleteEtablissement(e.ID, e.Nom)}
+                                className="px-4 py-4 text-muted hover:text-red-500 transition-colors shrink-0"
+                                title="Supprimer cet établissement"
+                              >
+                                <X size={14} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )
+                  }
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
+
       {/* SlideOver nouvelle famille */}
       <SlideOver open={slideOpen} onClose={() => setSlideOpen(false)} title="Ajouter une famille" width="md">
         <form onSubmit={e => { e.preventDefault(); handleSaveFamille() }} className="flex flex-col gap-4">
@@ -311,6 +405,22 @@ export default function FamillesPage() {
           </FormRow>
           <Field label="Quartier QVP" hint="ex. Bellevue Nantes">
             <Input value={form.Quartier_QVP} onChange={e => setForm(f => ({ ...f, Quartier_QVP: e.target.value }))} />
+          </Field>
+          <SaveButton accent="familles" />
+        </form>
+      </SlideOver>
+      {/* SlideOver nouvel établissement */}
+      <SlideOver open={slideEtabOpen} onClose={() => setSlideEtabOpen(false)} title="Ajouter un établissement" width="md">
+        <form onSubmit={e => { e.preventDefault(); handleSaveEtablissement() }} className="flex flex-col gap-4">
+          <Field label="Type" required>
+            <Select value={etabForm.Type} onChange={e => setEtabForm(f => ({ ...f, Type: e.target.value }))}>
+              <option value="École">École</option>
+              <option value="Collège">Collège</option>
+              <option value="Lycée">Lycée</option>
+            </Select>
+          </Field>
+          <Field label="Nom" required>
+            <Input value={etabForm.Nom} onChange={e => setEtabForm(f => ({ ...f, Nom: e.target.value }))} placeholder="ex. Collège Jules Verne" />
           </Field>
           <SaveButton accent="familles" />
         </form>
