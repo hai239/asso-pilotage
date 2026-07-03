@@ -35,15 +35,29 @@ export interface BeneficiairePourGroupage {
   niveauClasse?: string
   /** Créneau de disponibilité (INSCRIPTION "Disponibilite") — mode "disponibilite". */
   disponibilite?: string
+  /** Niveau CECRL attribué (EVALUATION "Niveau attribue", ex. "A1-", "A1+") —
+   *  critère final d'homogénéité au sein d'un groupe et source de son intitulé
+   *  ("Groupe A1"). Absent → estimé depuis les notes (cf. niveauDepuisNotes). */
+  niveauCECRL?: string
 }
 
 export interface GroupeBrouillon {
   /** Identifiant local (string pour éviter les collisions avec les ids existants). */
   id: string
   nom: string
+  /** Court suffixe distinctif du groupe (niveau CECRL ex. "A1", "A1/B1",
+   *  créneau de disponibilité, ou numéro à défaut) — c'est lui qui doit être
+   *  écrit dans la colonne "Groupe" de l'atelier une fois validé, `nom`
+   *  n'étant qu'un intitulé d'affichage complet incluant le titre de l'atelier. */
+  label: string
   /** Cycle scolaire du groupe (null pour les parents / hors cycle). */
   cycle: CycleScolaire | null
   beneficiaireIds: number[]
+  /** Créé à la main (bouton "Créer un nouveau groupe"), pas par l'algorithme —
+   *  son nom se recalcule à chaque ajout/retrait de membre pour refléter le
+   *  niveau réel du groupe (cf. brouillon-tab.tsx), contrairement à un groupe
+   *  généré dont le nom reste figé à la composition initiale. */
+  manuel?: boolean
 }
 
 /** Poids appliqué à une thématique dans le tri du groupage.
@@ -189,8 +203,9 @@ function ordonnerParPoids(
   })
 }
 
-/** Moyenne d'un bénéficiaire sur les thématiques ciblées (uniquement
- *  pour détecter les outliers — pas pour le groupage). */
+/** Moyenne d'un bénéficiaire sur les thématiques ciblées — sert à détecter
+ *  les outliers et, en dernier recours, à estimer un niveau CECRL (cf.
+ *  niveauDepuisNotes) quand aucun n'a été attribué formellement. */
 function moyenneSur(
   b: BeneficiairePourGroupage,
   dims: Thematique[],
@@ -200,6 +215,91 @@ function moyenneSur(
     .filter((n): n is number => n !== null)
   if (notes.length === 0) return null
   return notes.reduce((a, b) => a + b, 0) / notes.length
+}
+
+// ──────────────────────────────────────────────
+// Niveau CECRL — barrière d'homogénéité + intitulé des groupes
+// ──────────────────────────────────────────────
+// Échelle de base (ignore les nuances +/- de "Niveau attribué") : sert à
+// ordonner les groupes et à trier les libellés composés (ex. "A1/B1").
+const ECHELLE_NIVEAUX_BASE = ["Alpha", "A1", "A2", "B1", "B2", "C1", "C2"]
+
+/** En dessous de cet effectif, un palier de niveau ne peut pas former son
+ *  propre groupe (règle produit : 10 personnes minimum par groupe d'atelier)
+ *  — ses membres repartent dans le pot commun trié par notes uniquement. */
+const SEUIL_MIN_NIVEAU = 10
+
+/** "A1-", "A1+", "A1" → "A1". */
+function niveauBase(niveau: string): string {
+  return niveau.trim().replace(/[+-]$/, "")
+}
+
+/** Ordonne deux niveaux de base sur l'échelle CECRL ; les valeurs hors
+ *  échelle (saisie libre non reconnue) sont reléguées en fin, par ordre
+ *  alphabétique entre elles. */
+function compareNiveaux(a: string, b: string): number {
+  const ia = ECHELLE_NIVEAUX_BASE.indexOf(a), ib = ECHELLE_NIVEAUX_BASE.indexOf(b)
+  if (ia === -1 && ib === -1) return a.localeCompare(b)
+  if (ia === -1) return 1
+  if (ib === -1) return -1
+  return ia - ib
+}
+
+/** Deux niveaux sont "adjacents" s'ils se suivent directement sur l'échelle
+ *  CECRL (ex. A1/A2, A2/B1) — jamais un saut de palier (A1/B1 interdit,
+ *  même si A2 est vide). Une valeur hors échelle n'est adjacente à rien :
+ *  on préfère l'isoler plutôt que de deviner. Règle produit explicite.
+ *  "Alpha" n'est JAMAIS adjacent à rien, même à A1 : c'est le palier des
+ *  non-lecteurs/non-scripteurs, jamais mélangé à un autre niveau quel que
+ *  soit son effectif — règle produit strictement plus forte que le seuil
+ *  minimal (cf. SEUIL_MIN_NIVEAU), qui reste isolé même sous ce seuil. */
+function niveauxAdjacents(a: string, b: string): boolean {
+  if (a === "Alpha" || b === "Alpha") return false
+  const ia = ECHELLE_NIVEAUX_BASE.indexOf(a), ib = ECHELLE_NIVEAUX_BASE.indexOf(b)
+  return ia !== -1 && ib !== -1 && Math.abs(ia - ib) === 1
+}
+
+/** En l'absence de "Niveau attribué" explicite, estime un niveau de base
+ *  depuis la moyenne des notes /20 sur les compétences ciblées — quartiles
+ *  égaux sur les 4 paliers bas utilisés par l'association (Alpha/A1/A2/B1).
+ *  Approximatif : sert uniquement à ne pas exclure de la logique
+ *  d'homogénéité les bénéficiaires jamais passés par une évaluation CECRL
+ *  formelle. */
+function niveauDepuisNotes(b: BeneficiairePourGroupage, dims: Thematique[]): string | null {
+  const moy = moyenneSur(b, dims)
+  if (moy === null) return null
+  if (moy < 5) return "Alpha"
+  if (moy < 10) return "A1"
+  if (moy < 15) return "A2"
+  return "B1"
+}
+
+/** Niveau de base d'un bénéficiaire : "Niveau attribué" (EVALUATION) en
+ *  priorité, sinon estimé depuis ses notes. */
+function niveauDe(b: BeneficiairePourGroupage, dims: Thematique[]): string | null {
+  if (b.niveauCECRL && b.niveauCECRL.trim()) return niveauBase(b.niveauCECRL)
+  return niveauDepuisNotes(b, dims)
+}
+
+/** Vrai si le niveau de base du bénéficiaire est "Alpha" — sert à empêcher
+ *  toute action MANUELLE (drag & drop, bouton +Ajouter dans brouillon-tab)
+ *  de mélanger un Alpha avec un autre niveau, même si l'algorithme ne l'a
+ *  pas placé lui-même dans ce groupe (règle produit strictement plus forte
+ *  que le seuil minimal, cf. niveauxAdjacents). */
+export function estNiveauAlpha(b: BeneficiairePourGroupage, dims: Thematique[]): boolean {
+  return niveauDe(b, dims) === "Alpha"
+}
+
+/** Intitulé de groupe depuis les niveaux réellement présents parmi ses
+ *  membres (dédupliqués, triés sur l'échelle CECRL) : "A1" si homogène,
+ *  "A1/B1" si mixte. Chaîne vide si aucun niveau n'est déductible (repli sur
+ *  un intitulé numérique côté appelant). Exportée : réutilisée pour
+ *  recalculer le nom d'un groupe créé/complété à la main (cf. brouillon-tab). */
+export function libelleNiveaux(membres: BeneficiairePourGroupage[], dims: Thematique[]): string {
+  const niveaux = Array.from(new Set(
+    membres.map(b => niveauDe(b, dims)).filter((n): n is string => n !== null),
+  )).sort(compareNiveaux)
+  return niveaux.join("/")
 }
 
 /** Regroupe un lot par créneau de disponibilité (mode "disponibilite"). */
@@ -324,32 +424,109 @@ export function composerGroupes(
         groupes.push({
           id: `${atelier.id}-${cycle ?? "x"}-${groupeIndex}`,
           nom: `${prefixe} · ${key}`,
+          label: key,
           cycle,
           beneficiaireIds: membres.map(m => m.id),
         })
         groupeIndex++
       }
     } else {
+      // Barrière d'homogénéité par niveau CECRL (cf. niveauDe) : un palier
+      // avec assez d'effectif (≥ SEUIL_MIN_NIVEAU) forme son propre sous-lot,
+      // trié et tranché SANS mélanger les niveaux. En dessous du seuil,
+      // impossible de former un groupe complet rien que sur ce palier —
+      // ses membres repartent dans un pot commun trié uniquement par score,
+      // comme l'algorithme le faisait avant l'introduction du niveau.
+      const parNiveau = new Map<string, BeneficiairePourGroupage[]>()
+      for (const b of lot) {
+        const niv = niveauDe(b, dims) ?? ""
+        if (!parNiveau.has(niv)) parNiveau.set(niv, [])
+        parNiveau.get(niv)!.push(b)
+      }
+      const cles = Array.from(parNiveau.keys()).sort(compareNiveaux)
+
+      // Fusion des paliers trop petits : UNIQUEMENT avec UN SEUL palier
+      // ADJACENT sur l'échelle CECRL (ex. A1 trop petit → fusionné avec A2).
+      // Un sous-lot ne contient JAMAIS plus de 2 niveaux distincts — sinon un
+      // troisième niveau pourrait s'y greffer par la bande (A1-A2 puis
+      // A2-B1) et on se retrouverait avec A1 et B1 dans le même groupe, ce
+      // qui est explicitement interdit même si A2 sert de "pont". Un palier
+      // déjà autosuffisant (≥ SEUIL_MIN_NIVEAU) reste pur ; un petit palier
+      // sans voisin disponible forme son propre sous-lot isolé, même sous le
+      // seuil, plutôt que de violer la règle d'adjacence.
+      const sousLots: BeneficiairePourGroupage[][] = []
+      const niveauxDuSousLot: string[][] = []
+      const indexSousLotPar = new Map<string, number>()
+      for (const cle of cles) {
+        const membres = parNiveau.get(cle)!
+        if (membres.length >= SEUIL_MIN_NIVEAU) {
+          sousLots.push([...membres])
+          niveauxDuSousLot.push([cle])
+          indexSousLotPar.set(cle, sousLots.length - 1)
+        }
+      }
+      for (const cle of cles) {
+        if (indexSousLotPar.has(cle)) continue
+        const membres = parNiveau.get(cle)!
+        // Voisin déjà placé, adjacent, ET dont le sous-lot n'a encore qu'UN
+        // seul niveau (sinon on formerait une chaîne à 3 niveaux).
+        const voisinPlace = cles.find(autre =>
+          indexSousLotPar.has(autre) &&
+          niveauxAdjacents(cle, autre) &&
+          niveauxDuSousLot[indexSousLotPar.get(autre)!].length === 1,
+        )
+        if (voisinPlace) {
+          const idx = indexSousLotPar.get(voisinPlace)!
+          sousLots[idx].push(...membres)
+          niveauxDuSousLot[idx].push(cle)
+          indexSousLotPar.set(cle, idx)
+          continue
+        }
+        // Voisin petit pas encore traité et adjacent : les deux fusionnent ensemble.
+        const voisinLibre = cles.find(autre => autre !== cle && !indexSousLotPar.has(autre) && niveauxAdjacents(cle, autre))
+        if (voisinLibre) {
+          const idx = sousLots.length
+          sousLots.push([...membres, ...parNiveau.get(voisinLibre)!])
+          niveauxDuSousLot.push([cle, voisinLibre])
+          indexSousLotPar.set(cle, idx)
+          indexSousLotPar.set(voisinLibre, idx)
+          continue
+        }
+        // Isolé : aucun voisin adjacent disponible — son propre sous-lot,
+        // même sous le seuil, plutôt que de mélanger des niveaux non adjacents.
+        sousLots.push([...membres])
+        niveauxDuSousLot.push([cle])
+        indexSousLotPar.set(cle, sousLots.length - 1)
+      }
+
       // Tri par score composite standardisé (médiane + écart-type de la
-      // population du lot, cf. scoreComposite) puis découpe homogène (ou
-      // round-robin si hétérogène). Les stats sont calculées sur CE lot
-      // uniquement (déjà borné par cycle scolaire) — comparer un élève à une
-      // population d'un autre cycle n'aurait pas de sens, ils ne seront de
-      // toute façon jamais regroupés ensemble.
-      const stats = statsParCompetence(lot, dims)
-      const scores = new Map(lot.map(b => [b.id, scoreComposite(b, dims, stats)]))
-      const trie = [...lot].sort((a, b) => scores.get(b.id)! - scores.get(a.id)!)
-      const nGroupes = Math.max(1, Math.ceil(trie.length / taille))
-      const repartition = sliceEnGroupes(trie, nGroupes)
-      repartition.forEach(membres => {
-        groupes.push({
-          id: `${atelier.id}-${cycle ?? "x"}-${groupeIndex}`,
-          nom: `${prefixe} · Groupe ${groupeIndex}`,
-          cycle,
-          beneficiaireIds: membres.map(m => m.id),
+      // population du SOUS-lot, cf. scoreComposite) puis découpe homogène —
+      // comparer un bénéficiaire à une population d'un autre sous-lot
+      // n'aurait pas de sens, ils ne seront de toute façon jamais regroupés
+      // ensemble. L'intitulé du groupe reprend les niveaux réellement
+      // présents parmi ses membres (cf. libelleNiveaux) ; repli sur un
+      // numéro si aucun niveau n'est déductible.
+      const nomsUtilises = new Map<string, number>()
+      for (const sousLot of sousLots) {
+        const stats = statsParCompetence(sousLot, dims)
+        const scores = new Map(sousLot.map(b => [b.id, scoreComposite(b, dims, stats)]))
+        const trie = [...sousLot].sort((a, b) => scores.get(b.id)! - scores.get(a.id)!)
+        const nGroupes = Math.max(1, Math.ceil(trie.length / taille))
+        sliceEnGroupes(trie, nGroupes).forEach(membres => {
+          const label = libelleNiveaux(membres, dims)
+          const occurrence = (nomsUtilises.get(label) ?? 0) + 1
+          nomsUtilises.set(label, occurrence)
+          const suffixe = label ? (occurrence > 1 ? `${label} (${occurrence})` : label) : String(groupeIndex)
+          groupes.push({
+            id: `${atelier.id}-${cycle ?? "x"}-${groupeIndex}`,
+            nom: `${prefixe} · Groupe ${suffixe}`,
+            label: suffixe,
+            cycle,
+            beneficiaireIds: membres.map(m => m.id),
+          })
+          groupeIndex++
         })
-        groupeIndex++
-      })
+      }
     }
   }
 

@@ -29,12 +29,13 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import {
   Plus, Pencil, CalendarDays, Users, UserCheck, ClipboardCheck,
   X, Columns3, Check, Sparkles, Shuffle,
-  ChevronDown, ChevronRight, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
+  ChevronDown, Search, GraduationCap, Eye, UserCog, Clock, BarChart2,
 } from "lucide-react"
 import SlideOver, {
   Field, Input, Select, Textarea, FormRow, SaveButton, DeleteButton,
 } from "@/components/SlideOver"
 import Pagination, { usePagination } from "@/components/Pagination"
+import DateInput from "@/components/DateInput"
 import BrouillonGroupesTab from "./brouillon-tab"
 import { useFermerAuClicExterieur } from "@/lib/use-fermer-au-clic-exterieur"
 
@@ -137,6 +138,7 @@ interface AtelierSheet {
   Besoins: string
   Etapes: string
   Statut: string
+  Couleur: string
   beneficiaireIds: string[]
   intervenants: { ID_Intervenant: string; Heures: string; Role: string }[]
 }
@@ -167,7 +169,7 @@ function atelierFromSheet(a: AtelierSheet): Session {
     statut,
     // Champs FicheAtelier
     audience: a.Audience.toLowerCase().startsWith("parent") ? "parents" : "eleves",
-    couleur: "teal",
+    couleur: COULEURS_ATELIER.some(c => c.key === a.Couleur) ? (a.Couleur as CouleurAtelier) : "teal",
     competencesCiblees: a.Competences_Ciblees as Thematique[],
     ageMin: null,
     ageMax: null,
@@ -283,10 +285,20 @@ interface BeneficiaireSheet {
   notes: NotesPositionnement
 }
 
-/** Convertit "14/03/1989" (format Sheet) en "1989-03-14" (parsable par Date). */
+/** Convertit une date Sheet ("14/03/1989" FR, jour/mois non systématiquement
+ *  zéro-paddé selon la saisie, ou déjà au format ISO avec suffixe horaire
+ *  éventuel) en "1989-03-14" (parsable par Date / <input type="date">).
+ *  Chaîne vide si le format n'est pas reconnu, plutôt que de renvoyer la
+ *  valeur brute telle quelle — un champ vide vaut mieux qu'une date invalide
+ *  affichée comme une suite de chiffres incohérente. */
 function frToIso(d: string): string {
-  const m = (d ?? "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : (d ?? "")
+  const s = (d ?? "").trim()
+  if (!s) return ""
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (!m) return ""
+  const [, j, mo, a] = m
+  return `${a}-${mo.padStart(2, "0")}-${j.padStart(2, "0")}`
 }
 
 /** Mappe le statut d'inscription du Sheet vers le statut bénéficiaire de la page. */
@@ -1060,12 +1072,11 @@ function RecapEleveTab() {
 // ONGLET ATELIERS
 // ══════════════════════════════════════════════
 function AteliersTab({
-  sessions, beneficiaires, benevoles, groupes, onEdit, onView, onDelete, onAddSeance,
+  sessions, beneficiaires, benevoles, onEdit, onView, onDelete, onAddSeance,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
   benevoles: typeof benevolesMock.liste
-  groupes: Groupe[]
   onEdit: (s: Session) => void
   onView: (s: Session) => void
   onDelete: (id: number) => void
@@ -1110,25 +1121,16 @@ function AteliersTab({
     return true
   }
 
+  // Le dernier atelier créé apparaît en premier (ordre de création, pas la date de séance).
   const sorted   = [...sessions]
     .filter(matches)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .sort((a, b) => b.id - a.id)
   const upcoming = sorted.filter(s => s.statut !== "terminé" && s.statut !== "annulé")
   const past     = sorted.filter(s => s.statut === "terminé" || s.statut === "annulé")
-
-  const upcomingPagination = usePagination(upcoming, "asso-ateliers-upcoming-page-size")
-  const pastPagination     = usePagination(past, "asso-ateliers-past-page-size")
 
   const filtreActif = q !== "" || filterBenevole !== "tous" || filterDate !== "tous"
   function resetFiltres() {
     setSearch(""); setFilterBenevole("tous"); setFilterDate("tous")
-  }
-
-  // État "groupes dépliés" géré au niveau du parent pour ne pas se perdre
-  // quand SessionCard (composant interne) est recréé à chaque render.
-  const [groupesOuverts, setGroupesOuverts] = useState<Record<number, boolean>>({})
-  function toggleGroupes(id: number) {
-    setGroupesOuverts(m => ({ ...m, [id]: !m[id] }))
   }
 
   function SessionCard({ s }: { s: Session }) {
@@ -1138,9 +1140,6 @@ function AteliersTab({
     const bvls = s.benevoleIds
       .map(id => benevoles.find(bv => bv.id === id))
       .filter((bv): bv is (typeof benevoles)[0] => Boolean(bv))
-    // Groupes rattachés à cet atelier (rattachement explicite via atelierId).
-    const groupesAtelier = groupes.filter(g => g.atelierId === s.id)
-    const ouvert = !!groupesOuverts[s.id]
     // Palette pilotée par l'audience pour garder la cohérence avec la card Hub.
     const isParents = s.audience === "parents"
     const chipBgTinted = isParents ? "bg-communication/10"   : "bg-ateliers/10"
@@ -1148,7 +1147,7 @@ function AteliersTab({
     const chipText     = isParents ? "text-communication-dark": "text-ateliers-dark"
 
     return (
-      <li className="px-5 py-4 flex items-start gap-4 hover:bg-slate-50 group">
+      <div className="rounded-lg border border-border bg-surface px-4 py-3 flex items-start gap-4 hover:border-ateliers/40 transition-colors group">
         {/* Date column */}
         <div className="text-center w-14 shrink-0">
           {(() => {
@@ -1157,7 +1156,7 @@ function AteliersTab({
             return valide ? (
               <>
                 <p className="text-xs text-muted">{d.toLocaleDateString("fr-FR", { weekday: "short" })}</p>
-                <p className="text-lg font-bold text-foreground">{d.getDate()}</p>
+                <p className="text-base font-bold text-foreground">{d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}</p>
               </>
             ) : (
               <p className="text-lg font-bold text-muted">—</p>
@@ -1225,57 +1224,6 @@ function AteliersTab({
               </div>
             )}
           </div>
-
-          {/* ── Bloc "Voir les groupes" déroulable ── */}
-          <div className="mt-3 pt-3 border-t border-border/60">
-            {groupesAtelier.length === 0 ? (
-              <p className="text-[11px] text-muted italic">Aucun groupe rattaché.</p>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => toggleGroupes(s.id)}
-                  className={`flex items-center gap-1.5 text-xs font-medium ${chipText} hover:underline`}
-                >
-                  {ouvert ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  {ouvert ? "Masquer" : "Voir"} les groupes ({groupesAtelier.length})
-                </button>
-                {ouvert && (
-                  <ul className="mt-2 flex flex-col gap-2">
-                    {groupesAtelier.map(g => {
-                      const membres = g.beneficiaireIds
-                        .map(id => beneficiaires.find(b => b.id === id))
-                        .filter((b): b is Beneficiaire => Boolean(b))
-                      return (
-                        <li key={g.id} className="rounded-lg bg-slate-50 border border-border px-3 py-2">
-                          <div className="flex items-center justify-between gap-2 flex-wrap mb-1.5">
-                            <p className="text-xs font-semibold text-foreground">{g.nom}</p>
-                            <span className={`text-[10px] ${chipBgLight} ${chipText} px-1.5 py-0.5 rounded-full`}>
-                              {membres.length} bénéficiaire{membres.length > 1 ? "s" : ""}
-                            </span>
-                          </div>
-                          {membres.length === 0 ? (
-                            <p className="text-[10px] text-muted italic">Aucun bénéficiaire.</p>
-                          ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {membres.map(b => (
-                                <span
-                                  key={b.id}
-                                  className="text-[10px] bg-surface border border-border text-foreground px-2 py-0.5 rounded-full"
-                                >
-                                  {b.prenom} {b.nom}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-              </>
-            )}
-          </div>
         </div>
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1304,9 +1252,40 @@ function AteliersTab({
             <X size={13} />
           </button>
         </div>
-      </li>
+      </div>
     )
   }
+
+  /** Un encart par type d'atelier + période — le modèle "1 ligne ATELIER = 1
+   *  groupe" matérialise chaque groupe validé comme une session indépendante,
+   *  donc on les regroupe visuellement ici plutôt que de les afficher comme
+   *  des cartes indépendantes au même niveau. */
+  interface EncartAtelier {
+    key: string
+    categorie: string
+    periode: string
+    couleur: CouleurAtelier
+    sessions: Session[]
+  }
+  function regrouperParAtelier(items: Session[]): EncartAtelier[] {
+    // items est déjà trié par id décroissant : le premier membre rencontré
+    // pour une clé donnée est donc le plus récent, ce qui place naturellement
+    // l'encart au bon endroit sans tri supplémentaire (Map = ordre d'insertion).
+    const map = new Map<string, EncartAtelier>()
+    for (const s of items) {
+      const key = `${s.categorie}‖${s.periode}`
+      if (!map.has(key)) {
+        map.set(key, { key, categorie: s.categorie || "Sans type", periode: s.periode, couleur: s.couleur, sessions: [] })
+      }
+      map.get(key)!.sessions.push(s)
+    }
+    return Array.from(map.values())
+  }
+
+  const upcomingEncarts = regrouperParAtelier(upcoming)
+  const pastEncarts     = regrouperParAtelier(past)
+  const upcomingPagination = usePagination(upcomingEncarts, "asso-ateliers-upcoming-page-size")
+  const pastPagination     = usePagination(pastEncarts, "asso-ateliers-past-page-size")
 
   return (
     <div className="space-y-4">
@@ -1374,9 +1353,29 @@ function AteliersTab({
           <div className="px-5 py-3 border-b border-border">
             <h2 className="font-semibold text-foreground text-sm">À venir</h2>
           </div>
-          <ul className="divide-y divide-border">
-            {upcomingPagination.pageItems.map(s => <SessionCard key={s.id} s={s} />)}
-          </ul>
+          <div className="p-4 flex flex-col gap-3">
+            {upcomingPagination.pageItems.map(encart => {
+              const styles = COULEUR_STYLES[encart.couleur]
+              return (
+                <section key={encart.key} className={`rounded-xl border ${styles.blockBorder} ${styles.blockBg} overflow-hidden`}>
+                  <header className={`${styles.headerBg} px-4 py-2.5 flex items-center justify-between gap-3 border-b ${styles.blockBorder}`}>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${styles.dot}`} aria-hidden="true" />
+                      <h3 className={`text-sm font-semibold truncate ${styles.headerText}`}>
+                        Atelier {encart.categorie}{encart.periode && ` · ${encart.periode}`}
+                      </h3>
+                    </div>
+                    <span className={`text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-full bg-white/70 ${styles.headerText} shrink-0`}>
+                      {encart.sessions.length} groupe{encart.sessions.length > 1 ? "s" : ""}
+                    </span>
+                  </header>
+                  <div className="p-3 flex flex-col gap-2">
+                    {encart.sessions.map(s => <SessionCard key={s.id} s={s} />)}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
           <div className="px-5 pb-4">
             <Pagination
               page={upcomingPagination.page}
@@ -1395,9 +1394,29 @@ function AteliersTab({
           <div className="px-5 py-3 border-b border-border">
             <h2 className="font-semibold text-muted text-sm">Passés</h2>
           </div>
-          <ul className="divide-y divide-border">
-            {pastPagination.pageItems.map(s => <SessionCard key={s.id} s={s} />)}
-          </ul>
+          <div className="p-4 flex flex-col gap-3">
+            {pastPagination.pageItems.map(encart => {
+              const styles = COULEUR_STYLES[encart.couleur]
+              return (
+                <section key={encart.key} className={`rounded-xl border ${styles.blockBorder} ${styles.blockBg} overflow-hidden opacity-80`}>
+                  <header className={`${styles.headerBg} px-4 py-2.5 flex items-center justify-between gap-3 border-b ${styles.blockBorder}`}>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${styles.dot}`} aria-hidden="true" />
+                      <h3 className={`text-sm font-semibold truncate ${styles.headerText}`}>
+                        Atelier {encart.categorie}{encart.periode && ` · ${encart.periode}`}
+                      </h3>
+                    </div>
+                    <span className={`text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-full bg-white/70 ${styles.headerText} shrink-0`}>
+                      {encart.sessions.length} groupe{encart.sessions.length > 1 ? "s" : ""}
+                    </span>
+                  </header>
+                  <div className="p-3 flex flex-col gap-2">
+                    {encart.sessions.map(s => <SessionCard key={s.id} s={s} />)}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
           <div className="px-5 pb-4">
             <Pagination
               page={pastPagination.page}
@@ -1429,11 +1448,10 @@ function AteliersTab({
 // (Categorie). Cliquer sur un groupe ouvre l'atelier correspondant.
 // ══════════════════════════════════════════════
 function GroupesTab({
-  sessions, beneficiaires, onEdit, onView, onDelete,
+  sessions, beneficiaires, onView, onDelete,
 }: {
   sessions: Session[]
   beneficiaires: Beneficiaire[]
-  onEdit: (s: Session) => void
   onView: (s: Session) => void
   onDelete: (id: number) => void
 }) {
@@ -1447,8 +1465,9 @@ function GroupesTab({
 
   // Un "groupe" = un atelier ayant des membres (issu d'une composition validée
   // OU d'une sélection directe théâtre/marionnettes). Les ateliers "type" sans
-  // membres (en attente de composition) ne sont pas listés ici.
-  const groupes = sessions.filter(s => s.beneficiaireIds.length > 0)
+  // membres (en attente de composition) ne sont pas listés ici. Le dernier
+  // groupe créé apparaît en premier dans chaque section.
+  const groupes = sessions.filter(s => s.beneficiaireIds.length > 0).sort((a, b) => b.id - a.id)
 
   const q = search.trim().toLowerCase()
   const filtered = groupes.filter(s => {
@@ -1567,14 +1586,6 @@ function GroupesTab({
                           )}
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={e => { e.stopPropagation(); onEdit(s) }}
-                          className="p-1.5 rounded-lg hover:bg-white text-muted opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0"
-                          aria-label="Modifier le groupe"
-                        >
-                          <Pencil size={13} />
-                        </button>
                         <button
                           type="button"
                           onClick={e => { e.stopPropagation(); onDelete(s.id) }}
@@ -1746,11 +1757,24 @@ export default function AteliersPage() {
   const [sessionSlide, setSessionSlide] = useState(false)
   const [editingSession, setEditingSession] = useState<Session | null>(null)
   const [sessionForm, setSessionForm]   = useState<Omit<Session, "id">>(emptySession())
+  /** Écriture Sheet en cours (création/modification d'atelier, léger délai réseau). */
+  const [savingSession, setSavingSession] = useState(false)
+  /** Écritures Sheet en cours — pilotent les spinners des volets (SlideOver) élèves/adultes. */
+  const [deletingAtelier, setDeletingAtelier] = useState(false)
+  const [savingSeance, setSavingSeance] = useState(false)
+  const [deletingSeance, setDeletingSeance] = useState(false)
+  const [savingIntervenant, setSavingIntervenant] = useState(false)
+  const [deletingIntervenant, setDeletingIntervenant] = useState(false)
+  const [updatingGroupMembers, setUpdatingGroupMembers] = useState(false)
   const [detailSlide, setDetailSlide]   = useState(false)
   const [viewingSession, setViewingSession] = useState<Session | null>(null)
   /** Brouillon des membres édité depuis la vue « Détails » (onglet Groupes) —
    *  permet d'ajouter/retirer des élèves sans passer par le formulaire complet. */
   const [groupMembersDraft, setGroupMembersDraft] = useState<number[]>([])
+  /** Vue légère "Groupe" (onglet Groupes) — distincte de "Détails de l'atelier"
+   *  (onglet Ateliers) : juste le nom, l'effectif, l'édition des membres et la
+   *  suppression, sans les champs propres à l'atelier (dates, salle, séances…). */
+  const [groupViewSlide, setGroupViewSlide] = useState(false)
 
   // ── Groupes ──
   const [groupes, setGroupes]           = useState<Groupe[]>(ateliersMock.groupes as Groupe[])
@@ -1814,13 +1838,8 @@ export default function AteliersPage() {
         : [...f.intervenants, { id, heures: "" }],
     }))
   }
-  function setHeuresIntervenantSeance(id: number, heures: string) {
-    setSeanceForm(f => ({
-      ...f,
-      intervenants: f.intervenants.map(i => i.id === id ? { ...i, heures } : i),
-    }))
-  }
   async function handleSaveSeance() {
+    if (savingSeance) return
     const data = {
       ID_Atelier: seanceForm.atelierId,
       Nom: seanceForm.nom,
@@ -1834,6 +1853,7 @@ export default function AteliersPage() {
     const body = editingSeance
       ? { action: "updateSeance", idSeance: String(editingSeance.id), data, intervenants: intervenantsPayload }
       : { action: "addSeance", data, intervenants: intervenantsPayload }
+    setSavingSeance(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -1844,10 +1864,14 @@ export default function AteliersPage() {
       setToast({ message: editingSeance ? "Séance mise à jour." : "Séance créée." })
     } catch {
       setToast({ message: "Erreur : l'enregistrement de la séance a échoué." })
+    } finally {
+      setSavingSeance(false)
     }
   }
   async function handleDeleteSeance(id: number, atelierId: number) {
     if (!confirm("Supprimer définitivement cette séance ?")) return
+    if (deletingSeance) return
+    setDeletingSeance(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1859,6 +1883,8 @@ export default function AteliersPage() {
       setToast({ message: "Séance supprimée." })
     } catch {
       setToast({ message: "Erreur : la suppression a échoué." })
+    } finally {
+      setDeletingSeance(false)
     }
   }
 
@@ -1941,14 +1967,22 @@ export default function AteliersPage() {
     setDetailSlide(true)
     reloadSeances(s.id)
   }
+  /** Depuis l'onglet Groupes : vue légère (pas "Détails de l'atelier"). */
+  function openViewGroupe(s: Session) {
+    refreshMembres()
+    setViewingSession(s)
+    setGroupMembersDraft([...s.beneficiaireIds])
+    setGroupViewSlide(true)
+  }
   function toggleGroupMember(id: number) {
     setGroupMembersDraft(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
   }
   /** Enregistre le brouillon de membres édité depuis la vue « Détails » —
    *  ré-utilise atelierPayload pour ne pas écraser les autres champs de l'atelier. */
   async function handleUpdateGroupMembers() {
-    if (!viewingSession) return
+    if (!viewingSession || updatingGroupMembers) return
     const payload = atelierPayload({ ...viewingSession, beneficiaireIds: groupMembersDraft })
+    setUpdatingGroupMembers(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1960,6 +1994,8 @@ export default function AteliersPage() {
       setToast({ message: "Membres du groupe mis à jour dans le Sheet." })
     } catch {
       setToast({ message: "Erreur : la mise à jour des membres a échoué." })
+    } finally {
+      setUpdatingGroupMembers(false)
     }
   }
   /** Construit le payload d'écriture ATELIER (colonnes du Sheet) depuis le formulaire. */
@@ -1985,16 +2021,19 @@ export default function AteliersPage() {
         Besoins: f.besoins,
         Etapes: f.etapes,
         Statut: f.statut,
+        Couleur: f.couleur,
       },
       beneficiaireIds: f.beneficiaireIds,
       intervenantIds: f.intervenantIds,
     }
   }
   async function handleSaveSession() {
+    if (savingSession) return
     const payload = atelierPayload(sessionForm)
     const body = editingSession
       ? { action: "updateAtelier", idAtelier: String(editingSession.id), ...payload }
       : { action: "addAtelier", ...payload }
+    setSavingSession(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -2005,10 +2044,14 @@ export default function AteliersPage() {
       setToast({ message: editingSession ? "Atelier mis à jour dans le Sheet." : "Atelier créé dans le Sheet." })
     } catch {
       setToast({ message: "Erreur : l'enregistrement dans le Sheet a échoué." })
+    } finally {
+      setSavingSession(false)
     }
   }
   async function handleDeleteAtelier(id: number) {
     if (!confirm("Supprimer définitivement cet atelier ?")) return
+    if (deletingAtelier) return
+    setDeletingAtelier(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2017,6 +2060,7 @@ export default function AteliersPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setSessionSlide(false)
       setDetailSlide(false)
+      setGroupViewSlide(false)
       // Détache les groupes locaux (sous-onglet Groupes, créés à la main) qui
       // référençaient cet atelier — sinon ils gardent un atelierId fantôme.
       persistGroupes(groupes.map(g => g.atelierId === id ? { ...g, atelierId: null } : g))
@@ -2024,41 +2068,8 @@ export default function AteliersPage() {
       setToast({ message: "Atelier supprimé du Sheet." })
     } catch {
       setToast({ message: "Erreur : la suppression a échoué." })
-    }
-  }
-  /** CRUD direct (sous-onglet Brouillon groupes) sur un groupe déjà composé —
-   *  écrit ses membres dans le Sheet sans passer par un brouillon local.
-   *  Rejette en cas d'échec pour que l'appelant ne referme pas l'UI à tort. */
-  async function updateGroupeValideMembers(atelierId: number, beneficiaireIds: number[]) {
-    const source = sessions.find(s => s.id === atelierId)
-    if (!source) throw new Error("Atelier introuvable.")
-    const payload = atelierPayload({ ...source, beneficiaireIds })
-    try {
-      const res = await fetch("/api/sheets", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "updateAtelier", idAtelier: String(atelierId), ...payload }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      await reloadAteliers()
-      setToast({ message: "Membres du groupe mis à jour dans le Sheet." })
-    } catch (e) {
-      setToast({ message: "Erreur : la mise à jour des membres a échoué." })
-      throw e
-    }
-  }
-  /** Supprime définitivement un groupe déjà composé (sous-onglet Brouillon groupes). */
-  async function deleteGroupeValide(atelierId: number) {
-    try {
-      const res = await fetch("/api/sheets", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "deleteAtelier", idAtelier: String(atelierId) }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      await reloadAteliers()
-      setToast({ message: "Groupe supprimé du Sheet." })
-    } catch (e) {
-      setToast({ message: "Erreur : la suppression a échoué." })
-      throw e
+    } finally {
+      setDeletingAtelier(false)
     }
   }
   function toggleBenefInSession(id: number) {
@@ -2161,9 +2172,11 @@ export default function AteliersPage() {
     setIntervenantSlide(true)
   }
   async function handleSaveIntervenant() {
+    if (savingIntervenant) return
     const body = editingIntervenant
       ? { action: "updateIntervenant", idIntervenant: editingIntervenant.ID_Intervenant, data: intervenantForm }
       : { action: "addIntervenant", data: intervenantForm }
+    setSavingIntervenant(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -2174,10 +2187,14 @@ export default function AteliersPage() {
       setToast({ message: editingIntervenant ? "Intervenant mis à jour dans le Sheet." : "Intervenant créé dans le Sheet." })
     } catch {
       setToast({ message: "Erreur : l'enregistrement dans le Sheet a échoué." })
+    } finally {
+      setSavingIntervenant(false)
     }
   }
   async function handleDeleteIntervenant(id: string) {
     if (!confirm("Supprimer définitivement cet intervenant ? Il sera retiré de tous les ateliers où il est rattaché.")) return
+    if (deletingIntervenant) return
+    setDeletingIntervenant(true)
     try {
       const res = await fetch("/api/sheets", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2192,20 +2209,14 @@ export default function AteliersPage() {
       setToast({ message: "Intervenant supprimé du Sheet." })
     } catch {
       setToast({ message: "Erreur : la suppression a échoué." })
+    } finally {
+      setDeletingIntervenant(false)
     }
   }
 
   // ── Filtrage par audience (Lot D) ──
   // Une session a un champ `audience` ; on filtre toutes les vues par celui-ci.
-  // Pour les groupes : on garde ceux dont l'atelier rattaché correspond à
-  // l'audience. Les groupes manuels (atelierId=null) sont neutres et
-  // apparaissent dans les deux contextes.
   const sessionsForAudience = sessions.filter(s => s.audience === audience)
-  const groupesForAudience  = groupes.filter(g => {
-    if (g.atelierId === null) return true
-    const atelier = sessions.find(s => s.id === g.atelierId)
-    return atelier ? atelier.audience === audience : true
-  })
 
   // Bénéficiaires affichés dans le contexte : élèves pour audience=eleves,
   // parents pour audience=parents.
@@ -2310,7 +2321,6 @@ export default function AteliersPage() {
             sessions={sessionsForAudience}
             beneficiaires={beneficiaires}
             benevoles={benevoles}
-            groupes={groupesForAudience}
             onEdit={openEditSession}
             onView={openViewSession}
             onDelete={handleDeleteAtelier}
@@ -2325,8 +2335,7 @@ export default function AteliersPage() {
           <GroupesTab
             sessions={sessionsForAudience}
             beneficiaires={beneficiaires}
-            onEdit={openEditSession}
-            onView={openViewSession}
+            onView={openViewGroupe}
             onDelete={handleDeleteAtelier}
           />
         )
@@ -2346,7 +2355,7 @@ export default function AteliersPage() {
                 const g = nouveaux[i]
                 const payload = atelierPayload({
                   ...source,
-                  groupe: `Groupe ${i + 1}`,
+                  groupe: g.label,
                   beneficiaireIds: g.beneficiaireIds,
                 })
                 const res = await fetch("/api/sheets", {
@@ -2374,11 +2383,9 @@ export default function AteliersPage() {
             // (chacune porte ses propres bénéficiaires). Conservé pour la signature.
           }}
           onValidated={() => {
-            // Bascule sur l'onglet Ateliers pour voir les lignes-groupes créées.
-            setTab("ateliers")
+            // Bascule sur l'onglet Groupes pour voir les lignes-groupes créées.
+            setTab("groupes")
           }}
-          onUpdateGroupeValide={updateGroupeValideMembers}
-          onSupprimerGroupeValide={deleteGroupeValide}
         />
       )}
       {tab === "intervenants" && (
@@ -2403,7 +2410,14 @@ export default function AteliersPage() {
           const intervs = s.intervenantIds
             .map(id => intervenants.find(iv => Number(iv.ID_Intervenant) === id))
             .filter((iv): iv is IntervenantSheet => Boolean(iv))
-          const groupesAtelier = groupes.filter(g => g.atelierId === s.id)
+          // Cf. SessionCard : les autres groupes du même type + période (pas
+          // de rattachement explicite dans le nouveau modèle "1 ligne ATELIER = 1 groupe").
+          const groupesAtelier = sessions.filter(sib =>
+            sib.id !== s.id &&
+            sib.categorie === s.categorie &&
+            sib.periode === s.periode &&
+            sib.beneficiaireIds.length > 0,
+          )
           return (
             <div className="flex flex-col gap-5">
               <div>
@@ -2510,9 +2524,11 @@ export default function AteliersPage() {
                 <button
                   type="button"
                   onClick={handleUpdateGroupMembers}
-                  className="mt-2 w-full text-xs font-medium bg-ateliers-light text-ateliers-dark py-2 rounded-lg hover:bg-ateliers/20 transition-colors"
+                  disabled={updatingGroupMembers}
+                  className="mt-2 w-full text-xs font-medium bg-ateliers-light text-ateliers-dark py-2 rounded-lg hover:bg-ateliers/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
                 >
-                  Enregistrer les membres
+                  {updatingGroupMembers && <span className="w-3 h-3 border-2 border-ateliers-dark border-t-transparent rounded-full animate-spin" />}
+                  {updatingGroupMembers ? "Enregistrement…" : "Enregistrer les membres"}
                 </button>
               </div>
 
@@ -2550,7 +2566,7 @@ export default function AteliersPage() {
                   <div className="flex flex-col gap-1.5">
                     {groupesAtelier.map(g => (
                       <span key={g.id} className="text-sm text-foreground bg-slate-50 border border-border rounded-lg px-3 py-1.5">
-                        {g.nom}
+                        {g.groupe.trim() || g.titre} · {g.beneficiaireIds.length} bénéficiaire{g.beneficiaireIds.length > 1 ? "s" : ""}
                       </span>
                     ))}
                   </div>
@@ -2607,7 +2623,60 @@ export default function AteliersPage() {
                 >
                   Modifier
                 </button>
-                <DeleteButton onClick={() => handleDeleteAtelier(s.id)} />
+                <DeleteButton onClick={() => handleDeleteAtelier(s.id)} loading={deletingAtelier} />
+              </div>
+            </div>
+          )
+        })()}
+      </SlideOver>
+
+      {/* ════════════════════════════════════════
+          SLIDEOVER — Vue groupe (onglet Groupes) : juste le groupe, pas
+          l'atelier entier. Modifier les membres et supprimer, rien d'autre.
+      ════════════════════════════════════════ */}
+      <SlideOver
+        open={groupViewSlide}
+        onClose={() => setGroupViewSlide(false)}
+        title={viewingSession ? (viewingSession.groupe.trim() || viewingSession.titre) : "Groupe"}
+        width="md"
+      >
+        {viewingSession && (() => {
+          const s = viewingSession
+          return (
+            <div className="flex flex-col gap-5">
+              <div>
+                <p className="text-xs text-muted">
+                  {s.audience === "parents" ? "Parents" : "Élèves"} · {s.categorie}{s.periode && ` · ${s.periode}`}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[11px] text-muted mb-1.5">
+                  {s.audience === "parents" ? "Parents" : "Élèves"} du groupe ({groupMembersDraft.length})
+                </p>
+                <SelecteurBeneficiaires
+                  options={beneficiaires.filter(b => b.type === (s.audience === "parents" ? "parent" : "eleve"))}
+                  selectedIds={groupMembersDraft}
+                  onToggle={toggleGroupMember}
+                  placeholder={s.audience === "parents" ? "Sélectionner des parents…" : "Sélectionner des élèves…"}
+                />
+                <button
+                  type="button"
+                  onClick={handleUpdateGroupMembers}
+                  disabled={updatingGroupMembers}
+                  className="mt-2 w-full text-xs font-medium bg-ateliers-light text-ateliers-dark py-2 rounded-lg hover:bg-ateliers/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                >
+                  {updatingGroupMembers && <span className="w-3 h-3 border-2 border-ateliers-dark border-t-transparent rounded-full animate-spin" />}
+                  {updatingGroupMembers ? "Enregistrement…" : "Enregistrer les membres"}
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-border">
+                <DeleteButton
+                  label="Supprimer ce groupe"
+                  loading={deletingAtelier}
+                  onClick={() => handleDeleteAtelier(s.id)}
+                />
               </div>
             </div>
           )
@@ -2624,8 +2693,26 @@ export default function AteliersPage() {
         width="lg"
       >
         <form onSubmit={e => { e.preventDefault(); handleSaveSession() }} className="flex flex-col gap-4">
-          {/* ── Type d'atelier + groupe ── */}
-          <FormRow>
+          {/* ── Type d'atelier (+ groupe/niveau en édition uniquement — à la
+              création, il est déduit automatiquement du niveau évalué lors
+              de la composition des groupes) ── */}
+          {editingSession ? (
+            <FormRow>
+              <Field label="Type d'atelier" required>
+                <CategorieField
+                  audience={sessionForm.audience}
+                  value={sessionForm.categorie}
+                  onChange={c => setSessionForm(f => ({ ...f, categorie: c }))}
+                />
+              </Field>
+              <Field label="Groupe / niveau" hint="ex. A1">
+                <Input
+                  value={sessionForm.groupe}
+                  onChange={e => setSessionForm(f => ({ ...f, groupe: e.target.value }))}
+                />
+              </Field>
+            </FormRow>
+          ) : (
             <Field label="Type d'atelier" required>
               <CategorieField
                 audience={sessionForm.audience}
@@ -2633,38 +2720,29 @@ export default function AteliersPage() {
                 onChange={c => setSessionForm(f => ({ ...f, categorie: c }))}
               />
             </Field>
-            <Field label="Groupe / niveau" hint="ex. A1">
-              <Input
-                value={sessionForm.groupe}
-                onChange={e => setSessionForm(f => ({ ...f, groupe: e.target.value }))}
-              />
-            </Field>
-          </FormRow>
+          )}
 
           {/* ── Dates — élèves : début + fin (atelier sur plusieurs jours) ;
               parents : date unique (séance ponctuelle). ── */}
           {sessionForm.audience === "parents" ? (
             <Field label="Date">
-              <Input
-                type="date"
+              <DateInput
                 value={sessionForm.date}
-                onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+                onChange={v => setSessionForm(f => ({ ...f, date: v }))}
               />
             </Field>
           ) : (
             <FormRow>
               <Field label="Date de début">
-                <Input
-                  type="date"
+                <DateInput
                   value={sessionForm.date}
-                  onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+                  onChange={v => setSessionForm(f => ({ ...f, date: v }))}
                 />
               </Field>
               <Field label="Date de fin">
-                <Input
-                  type="date"
+                <DateInput
                   value={sessionForm.dateFin}
-                  onChange={e => setSessionForm(f => ({ ...f, dateFin: e.target.value }))}
+                  onChange={v => setSessionForm(f => ({ ...f, dateFin: v }))}
                 />
               </Field>
             </FormRow>
@@ -2835,8 +2913,8 @@ export default function AteliersPage() {
             )
           })()}
 
-          <SaveButton accent="ateliers" />
-          {editingSession && <DeleteButton onClick={() => handleDeleteAtelier(editingSession.id)} />}
+          <SaveButton accent="ateliers" loading={savingSession} />
+          {editingSession && <DeleteButton onClick={() => handleDeleteAtelier(editingSession.id)} loading={deletingAtelier} />}
         </form>
       </SlideOver>
 
@@ -2980,9 +3058,9 @@ export default function AteliersPage() {
             </Field>
           </FormRow>
 
-          <SaveButton accent="ateliers" />
+          <SaveButton accent="ateliers" loading={savingIntervenant} />
           {editingIntervenant && (
-            <DeleteButton onClick={() => handleDeleteIntervenant(editingIntervenant.ID_Intervenant)} />
+            <DeleteButton onClick={() => handleDeleteIntervenant(editingIntervenant.ID_Intervenant)} loading={deletingIntervenant} />
           )}
         </form>
       </SlideOver>
@@ -2997,6 +3075,33 @@ export default function AteliersPage() {
         width="md"
       >
         <form onSubmit={e => { e.preventDefault(); handleSaveSeance() }} className="flex flex-col gap-4">
+          {/* Groupe concerné — les autres groupes RÉELLEMENT VALIDÉS (au moins
+              un bénéficiaire) du même type + période sont proposés (cf. "Voir
+              les groupes" sur la carte), au cas où la séance doive finalement
+              être rattachée à un autre groupe que celui depuis lequel le
+              formulaire a été ouvert. Les ateliers "type" pas encore composés
+              (0 bénéficiaire) ne sont pas des groupes exploitables et sont
+              exclus — sauf l'atelier d'origine lui-même, toujours proposé
+              pour que le menu ne soit jamais vide. */}
+          <Field label="Groupe" required>
+            <Select
+              value={seanceForm.atelierId}
+              onChange={e => setSeanceForm(f => ({ ...f, atelierId: Number(e.target.value) }))}
+            >
+              {(() => {
+                const courant = sessions.find(s => s.id === seanceForm.atelierId)
+                const options = courant
+                  ? sessions.filter(s =>
+                      s.categorie === courant.categorie && s.periode === courant.periode &&
+                      (s.id === courant.id || s.beneficiaireIds.length > 0),
+                    )
+                  : []
+                return options.map(s => (
+                  <option key={s.id} value={s.id}>{s.groupe.trim() || s.titre}</option>
+                ))
+              })()}
+            </Select>
+          </Field>
           <Field label="Nom de la séance" hint="ex. Séance 3 — lecture à voix haute">
             <Input
               value={seanceForm.nom}
@@ -3004,10 +3109,9 @@ export default function AteliersPage() {
             />
           </Field>
           <Field label="Date" required>
-            <Input
-              type="date"
+            <DateInput
               value={seanceForm.date}
-              onChange={e => setSeanceForm(f => ({ ...f, date: e.target.value }))}
+              onChange={v => setSeanceForm(f => ({ ...f, date: v }))}
             />
           </Field>
           <div>
@@ -3070,36 +3174,9 @@ export default function AteliersPage() {
               placeholder="Sélectionner des intervenants…"
             />
           </Field>
-          {seanceForm.intervenants.length > 0 && (
-            <div className="flex flex-col gap-2 -mt-2">
-              {seanceForm.intervenants.map(entry => {
-                const iv = intervenants.find(x => Number(x.ID_Intervenant) === entry.id)
-                if (!iv) return null
-                return (
-                  <div key={entry.id} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-foreground truncate">{iv.Prenom} {iv.Nom}{iv.Type && ` · ${iv.Type}`}</span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={entry.heures}
-                        onChange={e => setHeuresIntervenantSeance(entry.id, e.target.value)}
-                        aria-label={`Heures pour ${iv.Prenom} ${iv.Nom}`}
-                        placeholder="0"
-                        className="w-16 px-2 py-1 text-sm rounded-lg border border-border bg-surface text-right focus:outline-none focus:ring-2 focus:ring-ateliers/30"
-                      />
-                      <span className="text-xs text-muted">h</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          <SaveButton accent="ateliers" />
+          <SaveButton accent="ateliers" loading={savingSeance} />
           {editingSeance && (
-            <DeleteButton onClick={() => handleDeleteSeance(editingSeance.id, editingSeance.atelierId)} />
+            <DeleteButton onClick={() => handleDeleteSeance(editingSeance.id, editingSeance.atelierId)} loading={deletingSeance} />
           )}
         </form>
       </SlideOver>

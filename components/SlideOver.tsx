@@ -145,27 +145,30 @@ const SAVE_ACCENTS = {
   subventions:    "bg-subventions-dark hover:opacity-90",
 } as const
 
-export function SaveButton({ onClick, label = "Enregistrer", disabled, accent = "brand" }: { onClick?: () => void; label?: string; disabled?: boolean; accent?: keyof typeof SAVE_ACCENTS }) {
+export function SaveButton({ onClick, label = "Enregistrer", disabled, loading, accent = "brand" }: { onClick?: () => void; label?: string; disabled?: boolean; loading?: boolean; accent?: keyof typeof SAVE_ACCENTS }) {
   return (
     <button
       type="submit"
       onClick={onClick}
-      disabled={disabled}
-      className={`w-full ${SAVE_ACCENTS[accent]} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors mt-2 disabled:opacity-50 disabled:cursor-not-allowed`}
+      disabled={disabled || loading}
+      className={`w-full ${SAVE_ACCENTS[accent]} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors mt-2 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2`}
     >
-      {label}
+      {loading && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+      {loading ? "Enregistrement…" : label}
     </button>
   )
 }
 
-export function DeleteButton({ onClick, label = "Supprimer" }: { onClick: () => void; label?: string }) {
+export function DeleteButton({ onClick, label = "Supprimer", loading }: { onClick: () => void; label?: string; loading?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="w-full border border-alert/30 text-alert py-2 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors"
+      disabled={loading}
+      className="w-full border border-alert/30 text-alert py-2 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
     >
-      {label}
+      {loading && <span className="w-3.5 h-3.5 border-2 border-alert border-t-transparent rounded-full animate-spin" />}
+      {loading ? "Suppression…" : label}
     </button>
   )
 }

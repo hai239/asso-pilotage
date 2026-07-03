@@ -659,6 +659,7 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         Besoins: a["Besoins"] ?? "",
         Etapes: a["Etapes"] ?? "",
         Statut: a["Statut"] ?? "",
+        Couleur: a["Couleur"] || "teal",
         beneficiaireIds,
         intervenants,
       }
@@ -1274,6 +1275,7 @@ function atelierRow(data: Record<string, unknown>): Record<string, unknown> {
     "Besoins": joinList(data.Besoins, "\n"),
     "Etapes": joinList(data.Etapes, "\n"),
     "Statut": data.Statut ?? "planifié",
+    "Couleur": data.Couleur ?? "teal",
   }
 }
 
@@ -1283,9 +1285,9 @@ async function addAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
-  // "Nom atelier" est une colonne nouvelle (ancien nom : "Titre") — la garantir
-  // avant l'écriture, sinon la valeur serait silencieusement ignorée.
-  await ensureColumn(sheets, "EVENEMENT2", "Nom atelier")
+  // "Nom atelier"/"Couleur" sont des colonnes nouvelles — les garantir avant
+  // l'écriture, sinon la valeur serait silencieusement ignorée.
+  await ensureColumns(sheets, "EVENEMENT2", ["Nom atelier", "Couleur"])
   const id = await nextId(sheets, "EVENEMENT2")
   await appendRow(sheets, "EVENEMENT2", { "ID": id, "Atelier ID": id, ...atelierRow(data) })
   await syncAtelierLiens(sheets, id, beneficiaireIds ?? [], intervenantIds ?? [])
@@ -1299,7 +1301,7 @@ async function updateAtelier(
   beneficiaireIds?: (string | number)[],
   intervenantIds?: (string | number)[],
 ) {
-  await ensureColumn(sheets, "EVENEMENT2", "Nom atelier")
+  await ensureColumns(sheets, "EVENEMENT2", ["Nom atelier", "Couleur"])
   const updated = await updateRowById(sheets, "EVENEMENT2", idAtelier, atelierRow(data))
   if (!updated) return { error: "Atelier introuvable" }
   await syncAtelierLiens(sheets, idAtelier, beneficiaireIds, intervenantIds)
