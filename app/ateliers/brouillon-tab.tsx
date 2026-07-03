@@ -363,8 +363,12 @@ export default function BrouillonGroupesTab(props: {
     const baseId = Date.now()
     // On lit les groupes depuis l'état courant du brouillon, donc tous les
     // ajouts/suppressions manuels et drag-drops faits avant le clic Valider
-    // sont bien inclus.
-    const nouveaux: Groupe[] = brouillon.groupes.map((g, i) => ({
+    // sont bien inclus. On ignore les groupes vides (ex. un groupe manuel créé
+    // puis jamais rempli) : les matérialiser créerait une ligne ATELIER
+    // fantôme sans bénéficiaire dans le Sheet.
+    const nouveaux: Groupe[] = brouillon.groupes
+      .filter(g => g.beneficiaireIds.length > 0)
+      .map((g, i) => ({
       id: baseId + i,
       nom: g.nom,
       label: g.label,
