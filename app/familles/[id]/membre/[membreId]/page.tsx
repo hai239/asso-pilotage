@@ -11,7 +11,9 @@ import {
   fetchFamilles, fetchMembre, updateMembre, deleteMembre,
   addPaiement, updatePaiement, deletePaiement, addInscription, updateInscription, uploadFichier,
   fetchDocuments, deleteDocument, getCurrentAnneeScolaire, getAnneeScolaireOptions, fetchScolariteFamille,
-  type FamilleSheet, type MembreSheet, type PaiementSheet, type InscriptionSheet, type DocumentJoint, type ScolariteEntry
+  fetchEtablissements, fetchProfesseurs, addEtablissement, addProfesseur, addScolarite,
+  type FamilleSheet, type MembreSheet, type PaiementSheet, type InscriptionSheet, type DocumentJoint, type ScolariteEntry,
+  type EtablissementItem, type ProfesseurItem
 } from "@/lib/sheets-api"
 
 function fileToBase64(file: File): Promise<string> {
@@ -137,6 +139,16 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
   const [docFile, setDocFile]   = useState<File | null>(null)
   const [docSaving, setDocSaving] = useState(false)
   const [openDocTypes, setOpenDocTypes] = useState<string[]>([])
+  // Édition scolarité (établissement + prof principal)
+  const [scolOpen, setScolOpen] = useState(false)
+  const [etablissements, setEtablissements] = useState<EtablissementItem[]>([])
+  const [professeurs, setProfesseurs] = useState<ProfesseurItem[]>([])
+  const [selEtabId, setSelEtabId] = useState("")
+  const [selProfId, setSelProfId] = useState("")
+  const [addEtabMode, setAddEtabMode] = useState(false)
+  const [newEtabForm, setNewEtabForm] = useState({ Type: "", Nom: "" })
+  const [addProfMode, setAddProfMode] = useState(false)
+  const [newProfForm, setNewProfForm] = useState({ Nom: "", Telephone: "", Email: "" })
 
   const loadData = useCallback(async () => {
     setLoadError(false)
@@ -188,6 +200,12 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
 
   useEffect(() => { loadData() }, [loadData])
 
+  // Charge les profs de l'établissement sélectionné (formulaire scolarité)
+  useEffect(() => {
+    if (!selEtabId) { setProfesseurs([]); return }
+    fetchProfesseurs(selEtabId).then(setProfesseurs).catch(() => setProfesseurs([]))
+  }, [selEtabId])
+
   if (loading) return (
     <div className="p-6 flex items-center justify-center min-h-[300px]">
       <p className="text-muted text-sm">Chargement…</p>
@@ -223,6 +241,38 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
   async function handleSaveNotes(json: string) {
     await updateMembre(membreId, { Notes: json })
     await loadData()
+  }
+
+  async function openEditScolarite() {
+    const sc = scolarites.find(s => s.ID_Membre === membreId) ?? null
+    setSelEtabId(sc?.Etablissement_ID ?? "")
+    setSelProfId(sc?.Prof_ID ?? "")
+    setAddEtabMode(false); setAddProfMode(false)
+    setNewEtabForm({ Type: "", Nom: "" }); setNewProfForm({ Nom: "", Telephone: "", Email: "" })
+    setScolOpen(true)
+    try { setEtablissements(await fetchEtablissements()) } catch { setEtablissements([]) }
+  }
+
+  async function handleAddEtablissement() {
+    const result = await addEtablissement(newEtabForm)
+    setEtablissements(await fetchEtablissements())
+    setSelEtabId(result.ID)
+    setNewEtabForm({ Type: "", Nom: "" })
+    setAddEtabMode(false)
+  }
+
+  async function handleAddProfesseur() {
+    const result = await addProfesseur({ ...newProfForm, Etablissement_ID: selEtabId })
+    setProfesseurs(await fetchProfesseurs(selEtabId))
+    setSelProfId(result.ID)
+    setNewProfForm({ Nom: "", Telephone: "", Email: "" })
+    setAddProfMode(false)
+  }
+
+  async function handleSaveScolarite() {
+    await addScolarite(membreId, selEtabId, selProfId)
+    await loadData()
+    setScolOpen(false)
   }
 
   function openNewPaiement() {
@@ -368,7 +418,6 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
     { label: "Professeur principal", value: maScolarite.ProfPrincipal?.Nom || "" },
     { label: "Téléphone prof.", value: maScolarite.ProfPrincipal?.Telephone || "" },
     { label: "Email prof.", value: maScolarite.ProfPrincipal?.Email || "" },
-    { label: "Rencontre prof.", value: maScolarite.Rencontre_Prof || "" },
   ].filter(c => c.value !== "") : []
 
   // Présence des pièces (Oui/Non) dérivée de DOCUMENTS JOINTS. Toujours affichée.
@@ -448,7 +497,7 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               Date_Naissance: membre.Date_Naissance, Telephone: membre.Telephone,
               WhatsApp: membre.WhatsApp, Email: membre.Email,
               Pays_Origine: membre.Pays_Origine, Langue_Maternelle: membre.Langue_Maternelle,
-              Contact_Principal: membre.Contact_Principal, Source_Orientation: membre.Source_Orientation,
+              Contact_Principal: membre.Contact_Principal,
             }); setSlideOpen(true) }}
             className="flex items-center gap-1.5 text-xs text-familles-dark hover:underline shrink-0"
           >
@@ -463,14 +512,24 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Scolarité — fiche d'un enfant */}
-      {estEnfant && champsScolarite.length > 0 && (
+      {estEnfant && (
         <div className="bg-surface border border-border rounded-xl p-5 mb-6">
-          <h2 className="text-sm font-semibold text-foreground mb-3">Scolarité</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-            {champsScolarite.map(c => (
-              <InfoRow key={c.label} label={c.label} value={c.value} />
-            ))}
+          <div className="flex items-center justify-between mb-3 gap-2">
+            <h2 className="text-sm font-semibold text-foreground">Scolarité</h2>
+            <button onClick={openEditScolarite}
+              className="flex items-center gap-1.5 text-xs text-familles-dark hover:underline shrink-0">
+              <Pencil size={13} /> Modifier
+            </button>
           </div>
+          {champsScolarite.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+              {champsScolarite.map(c => (
+                <InfoRow key={c.label} label={c.label} value={c.value} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted italic">Aucune scolarité renseignée.</p>
+          )}
         </div>
       )}
 
@@ -937,6 +996,85 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
         </form>
       </SlideOver>
 
+      {/* SlideOver édition scolarité */}
+      <SlideOver open={scolOpen} onClose={() => setScolOpen(false)} title="Modifier la scolarité" width="md">
+        <form onSubmit={e => { e.preventDefault(); handleSaveScolarite() }} className="flex flex-col gap-4">
+          {/* Établissement */}
+          <Field label="Établissement">
+            <div className="flex gap-2">
+              <Select value={selEtabId} onChange={e => { setSelEtabId(e.target.value); setSelProfId(""); setAddEtabMode(false) }}>
+                <option value="">— Choisir —</option>
+                {etablissements.map(et => <option key={et.ID} value={et.ID}>{et.Type ? `${et.Type} · ` : ""}{et.Nom}</option>)}
+              </Select>
+              <button type="button" onClick={() => setAddEtabMode(v => !v)}
+                className="px-2.5 rounded-lg border border-border text-muted hover:border-familles hover:text-familles-dark transition-colors text-sm">+</button>
+            </div>
+          </Field>
+
+          {addEtabMode && (
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-slate-50 border border-border">
+              <p className="text-xs font-medium text-muted">Nouvel établissement</p>
+              <FormRow>
+                <Field label="Type">
+                  <Select value={newEtabForm.Type} onChange={e => setNewEtabForm(f => ({ ...f, Type: e.target.value }))}>
+                    <option value="">— Choisir —</option>
+                    <option value="École">École</option>
+                    <option value="Collège">Collège</option>
+                    <option value="Lycée">Lycée</option>
+                  </Select>
+                </Field>
+                <Field label="Nom" required>
+                  <Input value={newEtabForm.Nom} onChange={e => setNewEtabForm(f => ({ ...f, Nom: e.target.value }))} />
+                </Field>
+              </FormRow>
+              <div className="flex gap-2">
+                <button type="button" onClick={handleAddEtablissement}
+                  className="px-3 py-1.5 rounded-lg bg-familles text-white text-xs font-medium hover:bg-familles-dark transition-colors">Enregistrer</button>
+                <button type="button" onClick={() => setAddEtabMode(false)}
+                  className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted hover:border-familles transition-colors">Annuler</button>
+              </div>
+            </div>
+          )}
+
+          {/* Professeur principal */}
+          <Field label="Professeur principal">
+            <div className="flex gap-2">
+              <Select value={selProfId} onChange={e => { setSelProfId(e.target.value); setAddProfMode(false) }} disabled={!selEtabId}>
+                <option value="">— Choisir —</option>
+                {professeurs.map(p => <option key={p.ID} value={p.ID}>{p.Nom}</option>)}
+              </Select>
+              <button type="button" onClick={() => setAddProfMode(v => !v)} disabled={!selEtabId}
+                className="px-2.5 rounded-lg border border-border text-muted hover:border-familles hover:text-familles-dark transition-colors text-sm disabled:opacity-40">+</button>
+            </div>
+          </Field>
+
+          {addProfMode && (
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-slate-50 border border-border">
+              <p className="text-xs font-medium text-muted">Nouveau professeur</p>
+              <Field label="Nom" required>
+                <Input value={newProfForm.Nom} onChange={e => setNewProfForm(f => ({ ...f, Nom: e.target.value }))} />
+              </Field>
+              <FormRow>
+                <Field label="Téléphone">
+                  <Input value={newProfForm.Telephone} onChange={e => setNewProfForm(f => ({ ...f, Telephone: e.target.value }))} />
+                </Field>
+                <Field label="Email">
+                  <Input type="email" value={newProfForm.Email} onChange={e => setNewProfForm(f => ({ ...f, Email: e.target.value }))} />
+                </Field>
+              </FormRow>
+              <div className="flex gap-2">
+                <button type="button" onClick={handleAddProfesseur}
+                  className="px-3 py-1.5 rounded-lg bg-familles text-white text-xs font-medium hover:bg-familles-dark transition-colors">Enregistrer</button>
+                <button type="button" onClick={() => setAddProfMode(false)}
+                  className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted hover:border-familles transition-colors">Annuler</button>
+              </div>
+            </div>
+          )}
+
+          <SaveButton accent="familles" />
+        </form>
+      </SlideOver>
+
       {/* SlideOver modification — informations personnelles uniquement */}
       <SlideOver
         open={slideOpen}
@@ -985,18 +1123,13 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <Input value={String(form.Langue_Maternelle ?? "")} onChange={e => setForm(f => ({ ...f, Langue_Maternelle: e.target.value }))} />
             </Field>
           </FormRow>
-          <FormRow>
-            <Field label="Contact principal">
-              <Select value={String(form.Contact_Principal ?? "")} onChange={e => setForm(f => ({ ...f, Contact_Principal: e.target.value }))}>
-                <option value="">— Choisir —</option>
-                <option value="Oui">Oui</option>
-                <option value="Non">Non</option>
-              </Select>
-            </Field>
-            <Field label="Source d'orientation">
-              <Input value={String(form.Source_Orientation ?? "")} onChange={e => setForm(f => ({ ...f, Source_Orientation: e.target.value }))} />
-            </Field>
-          </FormRow>
+          <Field label="Contact principal">
+            <Select value={String(form.Contact_Principal ?? "")} onChange={e => setForm(f => ({ ...f, Contact_Principal: e.target.value }))}>
+              <option value="">— Choisir —</option>
+              <option value="Oui">Oui</option>
+              <option value="Non">Non</option>
+            </Select>
+          </Field>
           <SaveButton accent="familles" />
           <DeleteButton onClick={handleDelete} />
         </form>

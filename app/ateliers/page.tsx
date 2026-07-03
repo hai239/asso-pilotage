@@ -1727,12 +1727,12 @@ export default function AteliersPage() {
   }
 
   const [tab, setTab] = useState<TabId>("ateliers")
-  // Le récap n'est pas encore fait pour les parents : si l'audience bascule
-  // dessus pendant qu'on est sur cet onglet, on retombe sur Ateliers.
+  const [toast, setToast] = useState<{ message: string } | null>(null)
+
+  // Le Récap n'a de sens que côté élèves — bascule sur Ateliers si on quitte ce contexte
   useEffect(() => {
     if (audience === "parents" && tab === "recap") setTab("ateliers")
   }, [audience, tab])
-  const [toast, setToast] = useState<{ message: string } | null>(null)
 
   // Auto-effacement du toast après 6 s
   useEffect(() => {

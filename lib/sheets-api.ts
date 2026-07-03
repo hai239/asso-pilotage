@@ -181,6 +181,8 @@ export interface ScolariteEntry {
   ID_Membre: string
   Nom: string
   Prenom: string
+  Etablissement_ID: string
+  Prof_ID: string
   Etablissement: { Type: string; Nom: string } | null
   ProfPrincipal: { Nom: string; Telephone: string; Email: string } | null
   Autorisation_Sortie: string
@@ -287,6 +289,8 @@ export interface PostSheet {
   plateformeContenu: Record<string, { contenu?: string; tags?: string; lien?: string }>
   statut: string
   auteur: string
+  commentaire?: string
+  categorieAtelier?: string
   sessionId: number | null
   participants?: PostParticipantsSheet
 }
@@ -311,6 +315,8 @@ export async function uploadPostMedia(data: {
   nom: string
   mimeType: string
   dataBase64: string
+  titre?: string
+  date?: string
 }): Promise<{ ok: boolean; url: string; fileId: string }> {
   return apiPost({ action: "uploadPostMedia", ...data }) as Promise<{ ok: boolean; url: string; fileId: string }>
 }
@@ -336,8 +342,8 @@ export async function addProfesseur(data: { Nom: string; Telephone: string; Emai
   return apiPost({ action: "addProfesseur", data }) as Promise<{ ok: boolean; ID: string }>
 }
 
-export async function addScolarite(idMembre: string, idEtab: string, idProf: string): Promise<{ ok: boolean }> {
-  return apiPost({ action: "addScolarite", idMembre, idEtab, idProf }) as Promise<{ ok: boolean }>
+export async function addScolarite(idMembre: string, idEtab: string, idProf: string, rencontre?: string): Promise<{ ok: boolean }> {
+  return apiPost({ action: "addScolarite", idMembre, idEtab, idProf, rencontre }) as Promise<{ ok: boolean }>
 }
 
 // ── Indicateur de configuration ────────────────

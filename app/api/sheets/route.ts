@@ -3,7 +3,7 @@ import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
   sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureColumns,
-  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, BILAN_ATELIER_FOLDER_ID,
+  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, createOrGetFolder, BILAN_ATELIER_FOLDER_ID,
 } from "@/lib/google-sheets-server"
 import { niveauEcole } from "@/lib/atelier"
 
@@ -270,7 +270,7 @@ async function deleteDocument(sheets: Sheets, idDoc: string) {
 //                       Date programmée | Plateforme RS | Catégorie  | Event ID
 // Colonnes ajoutées (ensureColumns) pour couvrir la richesse de l'app :
 //   Auteur | Brief | Plateforme Contenu (JSON) | Participants (JSON) | Session ID
-const CONTENUS_COLONNES_ETENDUES = ["Auteur", "Brief", "Plateforme Contenu", "Participants", "Session ID"]
+const CONTENUS_COLONNES_ETENDUES = ["Auteur", "Brief", "Plateforme Contenu", "Participants", "Session ID", "Commentaire", "Categorie Atelier"]
 
 function rowToPost(r: Record<string, unknown>) {
   let plateformeContenu: Record<string, unknown> = {}
@@ -294,6 +294,8 @@ function rowToPost(r: Record<string, unknown>) {
     plateformeContenu,
     statut: String(r["État "] || "brouillon"),
     auteur: String(r["Auteur"] ?? ""),
+    commentaire: String(r["Commentaire"] ?? ""),
+    categorieAtelier: String(r["Categorie Atelier"] ?? ""),
     sessionId: r["Session ID"] ? Number(r["Session ID"]) : null,
     participants,
   }
@@ -318,6 +320,8 @@ function postWriteMap(data: Record<string, unknown>): Record<string, unknown> {
   if (data.plateformeContenu !== undefined) map["Plateforme Contenu"] = JSON.stringify(data.plateformeContenu ?? {})
   if (data.participants !== undefined) map["Participants"] = data.participants ? JSON.stringify(data.participants) : ""
   if (data.sessionId !== undefined) map["Session ID"] = data.sessionId ?? ""
+  if (data.commentaire !== undefined) map["Commentaire"] = data.commentaire ?? ""
+  if (data.categorieAtelier !== undefined) map["Categorie Atelier"] = data.categorieAtelier ?? ""
   return map
 }
 
@@ -374,16 +378,34 @@ async function deletePost(sheets: Sheets, id: number) {
   return deleted ? { ok: true } : { error: "Post introuvable" }
 }
 
+function sanitizeDriveName(s: string, max = 80): string {
+  return s.replace(/[/\\:*?"<>|]/g, "-").replace(/\s+/g, " ").trim().slice(0, max)
+}
+
 async function uploadPostMedia(body: Record<string, unknown>) {
-  const nom = String(body.nom ?? "media")
   const mimeType = String(body.mimeType ?? "application/octet-stream")
   const dataBase64 = String(body.dataBase64 ?? "")
   if (!dataBase64) return { error: "Fichier vide" }
-  const { fileId, url: webViewLink } = await uploadToDrive(nom, mimeType, dataBase64, COMMUNICATION_MEDIA_FOLDER_ID)
-  await makeFilePublic(fileId) // rend le fichier lisible par lien (le lien "uc?export=download" renvoyé n'est pas utilisable en <img> inline)
-  // Pour les images : endpoint "thumbnail" de Drive, conçu pour l'affichage inline (contrairement à uc?export=download/view, peu fiable en <img src>).
-  // Pour les vidéos : pas de lecteur inline pour l'instant, on garde le lien de visualisation Drive.
-  const url = mimeType.startsWith("image/") ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600` : webViewLink
+
+  const titre = body.titre ? sanitizeDriveName(String(body.titre)) : ""
+  const date = body.date ? String(body.date).slice(0, 10) : ""
+
+  // Déterminer le dossier cible : sous-dossier par post si titre fourni, sinon dossier racine
+  let folderId = COMMUNICATION_MEDIA_FOLDER_ID
+  if (titre && date) {
+    const nomDossier = sanitizeDriveName(`${date} - ${titre}`)
+    folderId = await createOrGetFolder(nomDossier, COMMUNICATION_MEDIA_FOLDER_ID)
+  }
+
+  // Nommer le fichier : {titre} - {nom original} pour garantir l'unicité quand plusieurs
+  // images sont uploadées dans le même sous-dossier de post.
+  const isImage = mimeType.startsWith("image/")
+  const originalNom = sanitizeDriveName(String(body.nom ?? "media"))
+  const nomFichier = titre ? `${titre} - ${originalNom}` : originalNom
+
+  const { fileId, url: webViewLink } = await uploadToDrive(nomFichier, mimeType, dataBase64, folderId)
+  await makeFilePublic(fileId)
+  const url = isImage ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600` : webViewLink
   return { ok: true, url, fileId }
 }
 
@@ -476,6 +498,8 @@ async function getScolariteFamille(sheets: Sheets, idFamille: string) {
         ID_Membre: String(sc["Personne ID"]),
         Nom: String(p?.["Nom"] ?? ""),
         Prenom: String(p?.["Prenom"] ?? ""),
+        Etablissement_ID: String(sc["Etablissement ID"] ?? ""),
+        Prof_ID: String(sc["Prof principal ID"] ?? ""),
         Etablissement: etab ? { Type: String(etab["Type"] ?? ""), Nom: String(etab["Nom"] ?? "") } : null,
         ProfPrincipal: prof
           ? { Nom: String(prof["Nom"] ?? ""), Telephone: String(prof["Telephone"] ?? ""), Email: String(prof["Email"] ?? "") }
@@ -610,7 +634,7 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         .map((l) => ({
           ID_Intervenant: String(l["Intervenant ID"]),
           Heures: l["Heures"] ?? "",
-          Role: "",
+          Role: l["Fonction"] ?? "",
         }))
       const competences = String(a["Competences ciblees"] ?? "")
         .split(",").map((s) => s.trim()).filter(Boolean)
@@ -1223,7 +1247,7 @@ async function syncAtelierLiens(
     await deleteRowsWhereAll(sheets, "ATELIER_PARTICIPANT", { "Atelier ID": String(idAtelier), "Role": "Intervenant" })
     for (const iid of intervenantIds) {
       const rid = await nextId(sheets, "ATELIER_PARTICIPANT")
-      await appendRow(sheets, "ATELIER_PARTICIPANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Role": "Intervenant", "Heures": "" })
+      await appendRow(sheets, "ATELIER_PARTICIPANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Role": "Intervenant", "Heures": "", "Fonction": "" })
     }
   }
 }
@@ -1310,6 +1334,23 @@ async function deleteAtelier(sheets: Sheets, idAtelier: string) {
 // auto-référence), et "Séance ID" est l'auto-référence de la séance elle-même
 // (utilisée par ATELIER_PARTICIPANT/ASSIDUITE pour s'y rattacher).
 
+// Durée d'une séance calculée depuis ses horaires début/fin (HH:MM).
+function minutesFromHeures(heureDebut: unknown, heureFin: unknown): number {
+  const [h1, m1] = String(heureDebut ?? "").split(":").map(Number)
+  const [h2, m2] = String(heureFin ?? "").split(":").map(Number)
+  if ([h1, m1, h2, m2].some((n) => isNaN(n))) return 0
+  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
+  return mins > 0 ? mins : 0
+}
+
+function formatMinutes(mins: number): string {
+  if (mins <= 0) return ""
+  const rounded = Math.round(mins)
+  const h = Math.floor(rounded / 60)
+  const m = rounded % 60
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
+}
+
 /** Reconstruit toujours la ligne complète depuis `data` (même convention que
  *  `atelierRow`) : le formulaire séance doit envoyer l'état complet à chaque
  *  sauvegarde, pas un diff partiel — sinon les champs absents sont effacés. */
@@ -1373,6 +1414,7 @@ async function syncSeanceIntervenants(
       "Intervenant ID": entry.ID_Intervenant,
       "Role": "Intervenant",
       "Heures": entry.Heures ?? "",
+      "Fonction": "",
     })
   }
 }
@@ -1450,22 +1492,6 @@ function anneeScolaireFromIso(iso: string): string {
   if (!y || !m) return ""
   const baseYear = m >= 7 ? y : y - 1
   return `${String(baseYear % 100).padStart(2, "0")}-${String((baseYear + 1) % 100).padStart(2, "0")}`
-}
-
-function minutesFromHeures(heureDebut: unknown, heureFin: unknown): number {
-  const [h1, m1] = String(heureDebut ?? "").split(":").map(Number)
-  const [h2, m2] = String(heureFin ?? "").split(":").map(Number)
-  if ([h1, m1, h2, m2].some((n) => isNaN(n))) return 0
-  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
-  return mins > 0 ? mins : 0
-}
-
-function formatMinutes(mins: number): string {
-  if (mins <= 0) return ""
-  const rounded = Math.round(mins)
-  const h = Math.floor(rounded / 60)
-  const m = rounded % 60
-  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
 }
 
 /** Durée en heures décimales (ex. 90 → 1.5) — format numérique pour
@@ -1710,16 +1736,15 @@ async function addScolariteEntry(sheets: Sheets, body: Record<string, unknown>) 
   const idMembre = String(body.idMembre ?? "")
   const scolarites = await sheetToObjects(sheets, "SCOLARITE")
   const existing = scolarites.find(s => String(s["Personne ID"]) === idMembre)
+  const champs: Record<string, unknown> = {
+    "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+  }
+  if (body.rencontre !== undefined) champs["Rencontre prof"] = body.rencontre
   if (existing) {
-    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), {
-      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
-    })
+    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), champs)
   } else {
     const id = await nextId(sheets, "SCOLARITE")
-    await appendRow(sheets, "SCOLARITE", {
-      "ID": id, "Personne ID": idMembre,
-      "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
-    })
+    await appendRow(sheets, "SCOLARITE", { "ID": id, "Personne ID": idMembre, ...champs })
   }
   return { ok: true }
 }
