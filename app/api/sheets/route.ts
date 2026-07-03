@@ -3,8 +3,9 @@ import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
   sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureColumns,
-  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, createOrGetFolder,
+  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, createOrGetFolder, BILAN_ATELIER_FOLDER_ID,
 } from "@/lib/google-sheets-server"
+import { niveauEcole } from "@/lib/atelier"
 
 type Sheets = ReturnType<typeof getSheetsClient>
 
@@ -64,6 +65,8 @@ export async function GET(request: NextRequest) {
         return ok(await getPosts(sheets))
       case "getEvaluations":
         return ok(await getEvaluations(sheets))
+      case "getRecapEleves":
+        return ok({ rows: await computeRecapEleves(sheets) })
       case "getEtablissements":
         return ok(await getEtablissements(sheets))
       case "getProfesseurs":
@@ -130,6 +133,7 @@ export async function POST(request: NextRequest) {
       case "updatePost":      return ok(await updatePost(sheets, body.id, body.data))
       case "deletePost":      return ok(await deletePost(sheets, body.id))
       case "uploadPostMedia": return ok(await uploadPostMedia(body))
+      case "exportRecapEleves": return ok(await exportRecapEleves(sheets))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -1450,6 +1454,259 @@ async function deleteSeance(sheets: Sheets, idSeance: string) {
   await deleteRowsWhere(sheets, "ASSIDUITE", "Seance ID", [String(idSeance)])
   const deleted = await deleteRowById(sheets, "EVENEMENT2", idSeance)
   return deleted ? { ok: true } : { error: "Séance introuvable" }
+}
+
+// ── RÉCAP QUANTITATIF — ATELIERS ÉLÈVES ───────────────────
+// Une ligne = tous les groupes d'un même type d'atelier (Categorie) qui se
+// sont déroulés sur une même période (champ Periode, ex. "Vacances de
+// printemps 2026") — cf. modèle papier fourni par l'association. "Combien de
+// séances" et "durée de chaque séance" supposent une organisation uniforme
+// entre les groupes d'une même période (moyenne arrondie sinon).
+
+interface RecapEleveRow {
+  atelier: string
+  dates: string
+  vacances: string
+  combienDeGroupe: number
+  combienDeSeances: number
+  dureeChaqueSeance: number
+  heuresParEleve: number
+  nElèves: number
+  elementaire6e: number
+  collegeLycee: number
+  nSalaries: number
+  hSalariees: number
+  nStagiaires: number
+  hStagiaires: number
+  nBenevoles: number
+  hBenevoles: number
+}
+
+function average(nums: number[]): number {
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0
+}
+
+function parseHeures(v: unknown): number {
+  const n = Number(String(v ?? "").replace(",", "."))
+  return isNaN(n) ? 0 : n
+}
+
+/** "2025-10-20" → "25-26" (même convention que getCurrentAnneeScolaire côté
+ *  client : l'année scolaire commence en juillet). */
+function anneeScolaireFromIso(iso: string): string {
+  const [y, m] = iso.split("-").map(Number)
+  if (!y || !m) return ""
+  const baseYear = m >= 7 ? y : y - 1
+  return `${String(baseYear % 100).padStart(2, "0")}-${String((baseYear + 1) % 100).padStart(2, "0")}`
+}
+
+/** Durée en heures décimales (ex. 90 → 1.5) — format numérique pour
+ *  permettre les calculs côté Google Sheet, contrairement à formatMinutes(). */
+function minutesToHeures(mins: number): number {
+  return Math.round((mins / 60) * 100) / 100
+}
+
+async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
+  const [evenements, participants, intervenantsRaw, personnes, inscriptions, assiduite] = await Promise.all([
+    sheetToObjects(sheets, "EVENEMENT2"),
+    sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
+    sheetToObjects(sheets, "INTERVENANT"),
+    sheetToObjects(sheets, "PERSONNE"),
+    sheetToObjects(sheets, "INSCRIPTION"),
+    sheetToObjects(sheets, "ASSIDUITE"),
+  ])
+
+  // "Audience" vaut "Eleve"/"Parent" (singulier) dans le Sheet — même convention
+  // de détection que côté client (app/ateliers/page.tsx) : tout ce qui ne
+  // commence pas par "parent" est un atelier élève.
+  const ateliers = evenements.filter((a) =>
+    String(a["Type"] ?? "").toLowerCase() === "atelier" &&
+    !String(a["Audience"] ?? "").toLowerCase().startsWith("parent")
+  )
+  // Les séances sont des lignes EVENEMENT2 (Type = "Séance") dont "Atelier ID"
+  // référence l'atelier parent (voir seanceRow()/getSeances plus haut).
+  const seances = evenements.filter((s) => String(s["Type"] ?? "").toLowerCase() === "séance")
+
+  // Regroupement par (Categorie, Periode).
+  const groupes = new Map<string, { categorie: string; periode: string; ateliers: Record<string, unknown>[] }>()
+  for (const a of ateliers) {
+    const categorie = String(a["Categorie"] ?? "").trim() || "(sans catégorie)"
+    const periode = String(a["Periode"] ?? "").trim()
+    const key = `${categorie}‖${periode}`
+    if (!groupes.has(key)) groupes.set(key, { categorie, periode, ateliers: [] })
+    groupes.get(key)!.ateliers.push(a)
+  }
+
+  const intervenantTypeById = new Map(intervenantsRaw.map((i) => [String(i["ID"]), String(i["Type"] ?? "")]))
+  const inscriptionsByPersonne = new Map<string, Record<string, unknown>[]>()
+  for (const p of personnes) {
+    const id = String(p["ID"])
+    inscriptionsByPersonne.set(id, inscriptions.filter((i) => String(i["Personne ID"]) === id))
+  }
+  /** Le niveau/classe d'un élève est propre à une année scolaire (une nouvelle
+   *  ligne INSCRIPTION est créée à chaque réinscription) — un élève peut donc
+   *  changer de classe d'une année sur l'autre. On prend le "Niveau / Classe"
+   *  de l'année scolaire DE L'ATELIER concerné, pas la classe actuelle de
+   *  l'élève, sinon un atelier passé serait reclassé avec sa classe la plus
+   *  récente. Si aucune inscription ne correspond à cette année précise
+   *  (donnée manquante), on retombe sur l'inscription la plus récente connue. */
+  function niveauClasseAt(personneId: string, anneeScolaire: string): string {
+    const insc = inscriptionsByPersonne.get(personneId) ?? []
+    const exact = insc.find((i) => String(i["Annee scolaire"] ?? "").trim() === anneeScolaire)
+    const retenue = exact ?? inscriptionCourante(insc)
+    return retenue ? String(retenue["Niveau / Classe"] ?? "") : ""
+  }
+
+  function heuresParType(seanceIds: string[], type: string): { count: number; heures: number } {
+    const ids = new Set<string>()
+    let heures = 0
+    for (const l of participants) {
+      if (l["Role"] !== "Intervenant") continue
+      if (!seanceIds.includes(String(l["Seance ID"] ?? ""))) continue
+      const iid = String(l["Intervenant ID"])
+      if (intervenantTypeById.get(iid) !== type) continue
+      ids.add(iid)
+      heures += parseHeures(l["Heures"])
+    }
+    return { count: ids.size, heures }
+  }
+
+  /** Heures effectivement suivies par un élève sur les séances d'un atelier :
+   *  on part du principe qu'un élève d'un groupe assiste à toutes les séances
+   *  de son atelier, sauf celles où ASSIDUITE le marque explicitement absent/
+   *  excusé pour cette séance précise (pas de ligne ASSIDUITE = présent par
+   *  défaut, cf. décision produit). */
+  function heuresEleve(personneId: string, seancesAtelier: Record<string, unknown>[]): number {
+    let total = 0
+    for (const s of seancesAtelier) {
+      const sid = String(s["Séance ID"] ?? s["ID"])
+      const presence = assiduite.find((a) => String(a["Personne ID"]) === personneId && String(a["Seance ID"] ?? "") === sid)
+      const etat = String(presence?.["ETAT"] ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      if (presence && etat !== "present") continue
+      total += minutesFromHeures(s["Heure debut"], s["Heure fin"])
+    }
+    return total
+  }
+
+  const rows: (RecapEleveRow & { _dateTri: string })[] = []
+  for (const { categorie, periode, ateliers: groupe } of groupes.values()) {
+    const atelierIds = groupe.map((a) => String(a["ID"]))
+    const seancesGroupe = seances.filter((s) => atelierIds.includes(String(s["Atelier ID"])))
+    const seanceIds = seancesGroupe.map((s) => String(s["Séance ID"] ?? s["ID"]))
+
+    const datesIso = groupe
+      .flatMap((a) => [parseDateFr(String(a["Date debut"] ?? "")), parseDateFr(String(a["Date fin"] ?? ""))])
+      .filter(Boolean)
+    const dateDebutMin = datesIso.length ? datesIso.reduce((a, b) => (a < b ? a : b)) : ""
+    const dateFinMax = datesIso.length ? datesIso.reduce((a, b) => (a > b ? a : b)) : ""
+    const datesLabel = dateDebutMin
+      ? (dateFinMax && dateFinMax !== dateDebutMin ? `${fmtDateFr(dateDebutMin)} – ${fmtDateFr(dateFinMax)}` : fmtDateFr(dateDebutMin))
+      : ""
+
+    const nbSeancesParAtelier = atelierIds.map((id) => seances.filter((s) => String(s["Atelier ID"]) === id).length)
+    const nbSeancesMoyen = Math.round(average(nbSeancesParAtelier))
+
+    const dureesMinutes = seancesGroupe
+      .map((s) => minutesFromHeures(s["Heure debut"], s["Heure fin"]))
+      .filter((m) => m > 0)
+    const dureeMoyenneMin = average(dureesMinutes)
+
+    const beneficiaireIds = new Set(
+      participants
+        .filter((l) => l["Role"] === "Beneficiaire" && atelierIds.includes(String(l["Atelier ID"] ?? "")))
+        .map((l) => String(l["Personne ID"]))
+    )
+    const anneeScolaireGroupe = anneeScolaireFromIso(dateDebutMin)
+    let elementaire6e = 0, collegeLycee = 0
+    for (const pid of beneficiaireIds) {
+      const niveau = niveauEcole(niveauClasseAt(pid, anneeScolaireGroupe))
+      if (niveau === "elementaire" || niveau === "6e") elementaire6e++
+      else if (niveau === "college" || niveau === "lycee") collegeLycee++
+    }
+
+    // Heures/élève : moyenne, sur tous les élèves de tous les ateliers (groupes)
+    // du bucket, de leurs heures réellement suivies (séances de LEUR atelier,
+    // absences déduites) — pas une estimation uniforme du bucket entier.
+    const heuresParEleveIndiv: number[] = []
+    for (const a of groupe) {
+      const aid = String(a["ID"])
+      const seancesAtelier = seances.filter((s) => String(s["Atelier ID"]) === aid)
+      const elevesAtelier = participants
+        .filter((l) => l["Role"] === "Beneficiaire" && String(l["Atelier ID"] ?? "") === aid)
+        .map((l) => String(l["Personne ID"]))
+      for (const pid of elevesAtelier) heuresParEleveIndiv.push(heuresEleve(pid, seancesAtelier))
+    }
+
+    const salaries = heuresParType(seanceIds, "Salarié·e")
+    const stagiaires = heuresParType(seanceIds, "Stagiaire")
+    const benevoles = heuresParType(seanceIds, "Bénévole")
+
+    rows.push({
+      atelier: categorie,
+      dates: datesLabel,
+      vacances: periode,
+      combienDeGroupe: atelierIds.length,
+      combienDeSeances: nbSeancesMoyen,
+      dureeChaqueSeance: minutesToHeures(dureeMoyenneMin),
+      heuresParEleve: minutesToHeures(average(heuresParEleveIndiv)),
+      nElèves: beneficiaireIds.size,
+      elementaire6e,
+      collegeLycee,
+      nSalaries: salaries.count,
+      hSalariees: salaries.heures,
+      nStagiaires: stagiaires.count,
+      hStagiaires: stagiaires.heures,
+      nBenevoles: benevoles.count,
+      hBenevoles: benevoles.heures,
+      _dateTri: dateDebutMin,
+    })
+  }
+
+  return rows
+    .sort((a, b) => b._dateTri.localeCompare(a._dateTri) || a.atelier.localeCompare(b.atelier))
+    .map(({ _dateTri, ...r }) => r)
+}
+
+/** "1989-03-14" → "14/03/1989". */
+function fmtDateFr(iso: string): string {
+  const [y, m, d] = iso.split("-")
+  return d && m && y ? `${d}/${m}/${y}` : iso
+}
+
+const RECAP_ELEVES_HEADERS = [
+  "atelier", "dates de l'atelier", "vacances", "combien de groupe", "combien de séances",
+  "durée de chaque séance", "combien d'heures par élève", "n d'élèves", "élémentaires-6e",
+  "collège-lycée", "n de salariés impliqués", "n d'heures salariées", "n de stagiaires impliqués",
+  "n d'heures stagiaires", "n bénévoles impliqués", "n d'heures total bénévol",
+]
+
+function toCsvValue(v: string | number): string {
+  const s = String(v ?? "")
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function recapEleveToCsvRow(r: RecapEleveRow): (string | number)[] {
+  return [
+    r.atelier, r.dates, r.vacances, r.combienDeGroupe, r.combienDeSeances,
+    r.dureeChaqueSeance, r.heuresParEleve, r.nElèves, r.elementaire6e,
+    r.collegeLycee, r.nSalaries, r.hSalariees, r.nStagiaires,
+    r.hStagiaires, r.nBenevoles, r.hBenevoles,
+  ]
+}
+
+async function exportRecapEleves(sheets: Sheets) {
+  const rows = await computeRecapEleves(sheets)
+  const lines = [RECAP_ELEVES_HEADERS, ...rows.map(recapEleveToCsvRow)]
+    .map((line) => line.map(toCsvValue).join(";"))
+  const csv = "﻿" + lines.join("\r\n") // BOM : Excel doit lire les accents en UTF-8
+  const base64 = Buffer.from(csv, "utf8").toString("base64")
+
+  const horodatage = new Date().toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
+    .replace(/\//g, "-").replace(":", "h").replace(", ", " ")
+  const nomFichier = `Récap élèves - ${horodatage}.csv`
+
+  const { url } = await uploadToDrive(nomFichier, "text/csv", base64, BILAN_ATELIER_FOLDER_ID)
+  return { ok: true, url, nomFichier }
 }
 
 // ── ÉTABLISSEMENT / PROFESSEUR / SCOLARITE ────────────────

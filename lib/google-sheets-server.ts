@@ -41,6 +41,10 @@ export const POSITIONNEMENT_FOLDER_ID = "1VkfMr7hECZqKeSZhM7eIAbzCQ745yUUZ"
 // Dossier Drive "Communication - Médias" pour les images/vidéos des posts (module CONTENUS)
 export const COMMUNICATION_MEDIA_FOLDER_ID = "1yIGzxLSsdKmdc9N8Zdhkdiz10xdZdKY0"
 
+// Dossier Drive "Bilan atelier" — exports CSV du récapitulatif quantitatif des ateliers
+// (un nouveau fichier horodaté à chaque export, jamais d'écrasement).
+export const BILAN_ATELIER_FOLDER_ID = "1n7eliL5djCRdd65YAHnZm6DACsb-zWGJ"
+
 /** Rend un fichier Drive accessible publiquement (lecture) et retourne son URL de téléchargement direct. */
 export async function makeFilePublic(fileId: string): Promise<string> {
   const drive = getDriveClient()
